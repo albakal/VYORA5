@@ -224,8 +224,29 @@ data class AdminSettings(
     val minWithdrawalUsd: Double = 10.0,
     val rewardsEnabled: Boolean = true,
     val maxVideoDurationSec: Long = 180L,
+    val watchWheelEnabled: Boolean = true,
+    val watchWheelCycleSec: Long = 30L,
+    val watchWheelPointsPerCycle: Long = 5L,
+    val watchWheelDailyCapCycles: Long = 60L,
     val updatedBy: String = "",
     val updatedAt: VyoraTimestamp? = null
+)
+
+data class WatchWheelStatus(
+    val enabled: Boolean = true,
+    val cycleSec: Long = 30L,
+    val pointsPerCycle: Long = 5L,
+    val dailyCapCycles: Long = 60L,
+    val todayCycles: Long = 0L
+)
+
+data class WatchWheelClaimResult(
+    val awarded: Boolean = false,
+    val reason: String = "",
+    val pointsDelta: Long = 0L,
+    val todayCycles: Long = 0L,
+    val dailyCapCycles: Long = 60L,
+    val walletPoints: Long = 0L
 )
 
 data class AdminRole(

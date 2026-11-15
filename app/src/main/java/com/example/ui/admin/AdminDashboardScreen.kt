@@ -190,6 +190,41 @@ fun AdminDashboardScreen(
                             }
                         }
 
+                        item {
+                            Card(
+                                shape = MaterialTheme.shapes.large,
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = vString(R.string.watch_wheel_admin_title),
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "+${settings.watchWheelPointsPerCycle} pts / ${settings.watchWheelCycleSec}s • max ${settings.watchWheelDailyCapCycles}/day",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Switch(
+                                        checked = settings.watchWheelEnabled,
+                                        onCheckedChange = { checked ->
+                                            viewModel.adminUpdateWatchWheelSettings(enabled = checked)
+                                        },
+                                        modifier = Modifier.testTag("admin_overview_watch_wheel_switch")
+                                    )
+                                }
+                            }
+                        }
+
                         if (activeLives.isNotEmpty()) {
                             item {
                                 Text(
@@ -495,6 +530,11 @@ fun AdminDashboardScreen(
                     var maxDuration by remember(settings.maxVideoDurationSec) { mutableStateOf(settings.maxVideoDurationSec.toString()) }
                     var rewardsEnabled by remember(settings.rewardsEnabled) { mutableStateOf(settings.rewardsEnabled) }
 
+                    var watchWheelEnabled by remember(settings.watchWheelEnabled) { mutableStateOf(settings.watchWheelEnabled) }
+                    var watchWheelCycleSec by remember(settings.watchWheelCycleSec) { mutableStateOf(settings.watchWheelCycleSec.toString()) }
+                    var watchWheelPoints by remember(settings.watchWheelPointsPerCycle) { mutableStateOf(settings.watchWheelPointsPerCycle.toString()) }
+                    var watchWheelDailyCap by remember(settings.watchWheelDailyCapCycles) { mutableStateOf(settings.watchWheelDailyCapCycles.toString()) }
+
                     var newAdminUid by remember { mutableStateOf("") }
                     var newAdminEmail by remember { mutableStateOf("") }
 
@@ -503,6 +543,10 @@ fun AdminDashboardScreen(
                         minWithdraw = settings.minWithdrawalUsd.toString()
                         maxDuration = settings.maxVideoDurationSec.toString()
                         rewardsEnabled = settings.rewardsEnabled
+                        watchWheelEnabled = settings.watchWheelEnabled
+                        watchWheelCycleSec = settings.watchWheelCycleSec.toString()
+                        watchWheelPoints = settings.watchWheelPointsPerCycle.toString()
+                        watchWheelDailyCap = settings.watchWheelDailyCapCycles.toString()
                     }
 
                     LazyColumn(
@@ -561,6 +605,85 @@ fun AdminDashboardScreen(
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Text(vString(R.string.save_changes))
+                                    }
+                                }
+                            }
+                        }
+
+                        item {
+                            Card(
+                                shape = MaterialTheme.shapes.large,
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Text(
+                                        text = vString(R.string.watch_wheel_admin_title),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = vString(R.string.watch_wheel_admin_toggle),
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        Switch(
+                                            checked = watchWheelEnabled,
+                                            onCheckedChange = { checked ->
+                                                watchWheelEnabled = checked
+                                                viewModel.adminUpdateWatchWheelSettings(
+                                                    enabled = checked,
+                                                    cycleSec = watchWheelCycleSec.toLongOrNull() ?: settings.watchWheelCycleSec,
+                                                    pointsPerCycle = watchWheelPoints.toLongOrNull() ?: settings.watchWheelPointsPerCycle,
+                                                    dailyCapCycles = watchWheelDailyCap.toLongOrNull() ?: settings.watchWheelDailyCapCycles
+                                                )
+                                            },
+                                            modifier = Modifier.testTag("admin_watch_wheel_switch")
+                                        )
+                                    }
+                                    OutlinedTextField(
+                                        value = watchWheelCycleSec,
+                                        onValueChange = { watchWheelCycleSec = it },
+                                        label = { Text(vString(R.string.watch_wheel_admin_cycle_sec)) },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    OutlinedTextField(
+                                        value = watchWheelPoints,
+                                        onValueChange = { watchWheelPoints = it },
+                                        label = { Text(vString(R.string.watch_wheel_admin_points)) },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    OutlinedTextField(
+                                        value = watchWheelDailyCap,
+                                        onValueChange = { watchWheelDailyCap = it },
+                                        label = { Text(vString(R.string.watch_wheel_admin_daily_cap)) },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    Button(
+                                        onClick = {
+                                            viewModel.adminUpdateWatchWheelSettings(
+                                                enabled = watchWheelEnabled,
+                                                cycleSec = watchWheelCycleSec.toLongOrNull() ?: 30L,
+                                                pointsPerCycle = watchWheelPoints.toLongOrNull() ?: 5L,
+                                                dailyCapCycles = watchWheelDailyCap.toLongOrNull() ?: 60L
+                                            )
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = ElectricViolet),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("admin_save_watch_wheel_button")
+                                    ) {
+                                        Text(vString(R.string.watch_wheel_admin_save))
                                     }
                                 }
                             }

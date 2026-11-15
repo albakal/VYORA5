@@ -1,6 +1,8 @@
 package com.example.data.remote
 
 import android.content.Context
+import com.example.data.model.WatchWheelClaimResult
+import com.example.data.model.WatchWheelStatus
 import kotlinx.coroutines.CancellationException
 import org.json.JSONObject
 
@@ -132,6 +134,48 @@ class SupabaseBackendRepository(
         )
         supabase.notifyChange("withdrawals", "wallet")
         true
+    }.onFailure { e ->
+        if (e is CancellationException) throw e
+    }
+
+    suspend fun fetchWatchWheelStatus(): Result<WatchWheelStatus> = runCatching {
+        val raw = supabase.rpc("vyora_get_watch_wheel_status")
+        val data = if (raw.isBlank()) JSONObject() else JSONObject(raw)
+        WatchWheelStatus(
+            enabled = data.optBoolean("enabled", true),
+            cycleSec = data.optLong("cycleSec", 30L).coerceIn(10L, 180L),
+            pointsPerCycle = data.optLong("pointsPerCycle", 5L).coerceIn(1L, 500L),
+            dailyCapCycles = data.optLong("dailyCapCycles", 60L).coerceIn(1L, 500L),
+            todayCycles = data.optLong("todayCycles", 0L).coerceAtLeast(0L)
+        )
+    }.onFailure { e ->
+        if (e is CancellationException) throw e
+    }
+
+    suspend fun claimWatchWheelReward(
+        videoId: String,
+        watchedSec: Long
+    ): Result<WatchWheelClaimResult> = runCatching {
+        val raw = supabase.rpc(
+            "vyora_claim_watch_wheel_reward",
+            JSONObject().apply {
+                put("p_video_id", videoId)
+                put("p_watched_sec", watchedSec.coerceAtLeast(1L))
+            }
+        )
+        val data = if (raw.isBlank()) JSONObject() else JSONObject(raw)
+        val result = WatchWheelClaimResult(
+            awarded = data.optBoolean("awarded", false),
+            reason = data.optString("reason"),
+            pointsDelta = data.optLong("pointsDelta", 0L),
+            todayCycles = data.optLong("todayCycles", 0L),
+            dailyCapCycles = data.optLong("dailyCapCycles", 60L),
+            walletPoints = data.optLong("walletPoints", 0L)
+        )
+        if (result.awarded) {
+            supabase.notifyChange("wallet")
+        }
+        result
     }.onFailure { e ->
         if (e is CancellationException) throw e
     }

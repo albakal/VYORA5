@@ -261,19 +261,65 @@ class WalletAdminRepository(
         maxVideoDurationSec: Long
     ): Result<Unit> = runCatching {
         val adminUid = requireUid()
-        supabase.insert(
-            "vyora_admin_settings",
-            JSONObject().apply {
-                put("id", "global")
-                put("point_value_usd", pointValueUsd.coerceAtLeast(0.0001))
-                put("min_withdrawal_usd", minWithdrawalUsd.coerceAtLeast(1.0))
-                put("rewards_enabled", rewardsEnabled)
-                put("max_video_duration_sec", maxVideoDurationSec.coerceIn(15L, 300L))
+        val payload = JSONObject().apply {
+            put("point_value_usd", pointValueUsd.coerceAtLeast(0.0001))
+            put("min_withdrawal_usd", minWithdrawalUsd.coerceAtLeast(1.0))
+            put("rewards_enabled", rewardsEnabled)
+            put("max_video_duration_sec", maxVideoDurationSec.coerceIn(15L, 300L))
+            put("updated_by", adminUid)
+        }
+        val updated = supabase.update("vyora_admin_settings", "id=eq.global", payload)
+        if (updated.length() == 0) {
+            supabase.insert(
+                "vyora_admin_settings",
+                JSONObject(payload.toString()).put("id", "global"),
+                upsert = true,
+                onConflict = "id"
+            )
+        }
+        supabase.notifyChange("admin_settings")
+        Unit
+    }.onFailure { if (it is CancellationException) throw it }
+
+    suspend fun updateWatchWheelSettings(
+        enabled: Boolean,
+        cycleSec: Long,
+        pointsPerCycle: Long,
+        dailyCapCycles: Long
+    ): Result<Unit> = runCatching {
+        val adminUid = requireUid()
+        val cleanCycle = cycleSec.coerceIn(10L, 180L)
+        val cleanPoints = pointsPerCycle.coerceIn(1L, 500L)
+        val cleanCap = dailyCapCycles.coerceIn(1L, 500L)
+        val rpcDone = runCatching {
+            supabase.rpc(
+                "vyora_admin_update_watch_wheel",
+                JSONObject().apply {
+                    put("p_enabled", enabled)
+                    put("p_cycle_sec", cleanCycle)
+                    put("p_points_per_cycle", cleanPoints)
+                    put("p_daily_cap_cycles", cleanCap)
+                }
+            )
+        }.isSuccess
+        if (!rpcDone) {
+            val payload = JSONObject().apply {
+                put("watch_wheel_enabled", enabled)
+                put("watch_wheel_cycle_sec", cleanCycle)
+                put("watch_wheel_points_per_cycle", cleanPoints)
+                put("watch_wheel_daily_cap_cycles", cleanCap)
                 put("updated_by", adminUid)
-            },
-            upsert = true,
-            onConflict = "id"
-        )
+            }
+            val updated = supabase.update("vyora_admin_settings", "id=eq.global", payload)
+            if (updated.length() == 0) {
+                supabase.insert(
+                    "vyora_admin_settings",
+                    JSONObject(payload.toString()).put("id", "global"),
+                    upsert = true,
+                    onConflict = "id"
+                )
+            }
+        }
         supabase.notifyChange("admin_settings")
         Unit
     }.onFailure { if (it is CancellationException) throw it }

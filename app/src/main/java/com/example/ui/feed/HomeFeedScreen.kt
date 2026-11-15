@@ -122,7 +122,8 @@ fun HomeFeedScreen(
     onOpenLiveLobby: () -> Unit,
     onOpenUserProfile: (String) -> Unit,
     onOpenSoundDetail: (String, String) -> Unit,
-    onOpenCreate: () -> Unit
+    onOpenCreate: () -> Unit,
+    onOpenWallet: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -132,6 +133,9 @@ fun HomeFeedScreen(
     val bookmarkedIds by viewModel.bookmarkedIds.collectAsStateWithLifecycle()
     val notifications by viewModel.notifications.collectAsStateWithLifecycle()
     val activeUsers by viewModel.activeUsers.collectAsStateWithLifecycle()
+    val adminSettings by viewModel.adminSettings.collectAsStateWithLifecycle()
+    val watchWheelState by viewModel.watchWheelState.collectAsStateWithLifecycle()
+    val wallet by viewModel.wallet.collectAsStateWithLifecycle()
 
     val unreadCount = remember(notifications) { notifications.count { !it.isRead } }
     var selectedTab by remember { mutableStateOf(0) } // 0 = For You, 1 = Following
@@ -139,6 +143,9 @@ fun HomeFeedScreen(
 
     var commentTargetVideo by remember { mutableStateOf<VideoPost?>(null) }
     var reportTargetVideo by remember { mutableStateOf<VideoPost?>(null) }
+    var showWatchWheelDialog by remember { mutableStateOf(false) }
+    var currentFocusedVideoId by remember { mutableStateOf("") }
+    var isCurrentVideoActivelyPlaying by remember { mutableStateOf(false) }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -156,6 +163,40 @@ fun HomeFeedScreen(
     LaunchedEffect(isScreenActive) {
         if (!isScreenActive) {
             playerPool.pauseAll()
+            isCurrentVideoActivelyPlaying = false
+        }
+    }
+
+    LaunchedEffect(
+        isScreenActive,
+        isCurrentVideoActivelyPlaying,
+        currentFocusedVideoId,
+        adminSettings.watchWheelEnabled,
+        commentTargetVideo,
+        reportTargetVideo,
+        showWatchWheelDialog
+    ) {
+        val activeFeed = isScreenActive &&
+            currentFocusedVideoId.isNotBlank() &&
+            commentTargetVideo == null &&
+            reportTargetVideo == null
+        if (!adminSettings.watchWheelEnabled || !activeFeed || !isCurrentVideoActivelyPlaying) {
+            viewModel.onFeedPlaybackTick(
+                videoId = currentFocusedVideoId,
+                deltaMillis = 0L,
+                isScreenActive = activeFeed,
+                isVideoPlaying = isCurrentVideoActivelyPlaying
+            )
+            return@LaunchedEffect
+        }
+        while (true) {
+            delay(250L)
+            viewModel.onFeedPlaybackTick(
+                videoId = currentFocusedVideoId,
+                deltaMillis = 250L,
+                isScreenActive = true,
+                isVideoPlaying = true
+            )
         }
     }
 
@@ -201,6 +242,7 @@ fun HomeFeedScreen(
                     LaunchedEffect(pagerState.currentPage, visibleVideos, isScreenActive) {
                         val currentVideo = visibleVideos.getOrNull(pagerState.currentPage)
                         if (currentVideo != null && isScreenActive) {
+                            currentFocusedVideoId = currentVideo.id
                             playerPool.pauseAllExcept(currentVideo.id)
                             viewModel.recordView(currentVideo.id)
                             val nextVideo = visibleVideos.getOrNull(pagerState.currentPage + 1)
@@ -208,6 +250,8 @@ fun HomeFeedScreen(
                                 playerPool.preloadNext(nextVideo.id, nextVideo.videoUrl)
                             }
                         } else {
+                            currentFocusedVideoId = ""
+                            isCurrentVideoActivelyPlaying = false
                             playerPool.pauseAll()
                         }
                     }
@@ -233,6 +277,11 @@ fun HomeFeedScreen(
                             isFollowing = isFollowing,
                             isBookmarked = isBookmarked,
                             checkInitiallyLiked = { viewModel.isVideoLiked(video.id) },
+                            onFocusedPlaybackChanged = { active ->
+                                if (isPageFocused) {
+                                    isCurrentVideoActivelyPlaying = active
+                                }
+                            },
                             onToggleLike = { viewModel.toggleLike(video) },
                             onToggleBookmark = { viewModel.toggleBookmark(video.id) },
                             onOpenComments = { commentTargetVideo = video },
@@ -320,6 +369,30 @@ fun HomeFeedScreen(
                 }
             }
         }
+        // Floating Watch Earnings Wheel (controlled by Admin ON/OFF toggle)
+        AnimatedVisibility(
+            visible = adminSettings.watchWheelEnabled && watchWheelState.enabled,
+            enter = fadeIn() + scaleIn(spring()),
+            exit = fadeOut() + scaleOut(),
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .statusBarsPadding()
+                .padding(top = 66.dp, start = 14.dp)
+        ) {
+            WatchEarningsWheelBadge(
+                state = watchWheelState,
+                onClick = { showWatchWheelDialog = true }
+            )
+        }
+    }
+
+    if (showWatchWheelDialog) {
+        WatchEarningsWheelDialog(
+            state = watchWheelState,
+            walletPoints = wallet?.points ?: 0L,
+            onDismiss = { showWatchWheelDialog = false },
+            onOpenWallet = onOpenWallet
+        )
     }
 
     if (commentTargetVideo != null) {
@@ -378,6 +451,7 @@ private fun VideoFeedItem(
     isFollowing: Boolean,
     isBookmarked: Boolean,
     checkInitiallyLiked: suspend () -> Boolean,
+    onFocusedPlaybackChanged: (Boolean) -> Unit,
     onToggleLike: () -> Unit,
     onToggleBookmark: () -> Unit,
     onOpenComments: () -> Unit,
@@ -403,6 +477,8 @@ private fun VideoFeedItem(
         player.playWhenReady = isFocused && !isManuallyPaused
         if (!isFocused) {
             player.pause()
+        } else {
+            onFocusedPlaybackChanged(!isManuallyPaused)
         }
     }
 

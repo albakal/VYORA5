@@ -199,4 +199,17 @@
     <string name="earn_admin_approve_exception">اعتماد استثناء عائلي</string>
     <string name="earn_admin_block_device">حظر الجهاز</string>
     <string name="earn_admin_payout_logs">سجل اعتماد وصرف المكافآت</string>
+
+    <!-- Watch Earnings Wheel -->
+    <string name="watch_wheel_title">عجلة الربح من المشاهدات</string>
+    <string name="watch_wheel_desc">استمر في مشاهدة الفيديوهات! كل %2$d ثانية من المشاهدة الفعلية تكتمل العجلة وتُضاف +%1$d نقطة مباشرة إلى محفظتك.</string>
+    <string name="watch_wheel_today_cycles">دورات العجلة المكتملة اليوم</string>
+    <string name="watch_wheel_max_short">مكتمل</string>
+    <string name="watch_wheel_admin_title">عجلة الربح أثناء التصفح</string>
+    <string name="watch_wheel_admin_toggle">تشغيل عجلة الربح للمستخدمين</string>
+    <string name="watch_wheel_admin_cycle_sec">مدة الدورة (بالثواني)</string>
+    <string name="watch_wheel_admin_points">النقاط لكل دورة</string>
+    <string name="watch_wheel_admin_daily_cap">الحد الأقصى للدورات يومياً</string>
+    <string name="watch_wheel_admin_save">حفظ إعدادات العجلة</string>
+    <string name="watch_wheel_reward_toast">مبروك! اكتملت عجلة المشاهدة وتمت إضافة +%1$d نقطة لمحفظتك.</string>
 </resources>

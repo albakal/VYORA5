@@ -199,4 +199,17 @@
     <string name="earn_admin_approve_exception">Approve Family Exception</string>
     <string name="earn_admin_block_device">Block Device</string>
     <string name="earn_admin_payout_logs">Payout &amp; Review History</string>
+
+    <!-- Watch Earnings Wheel -->
+    <string name="watch_wheel_title">Watch Earnings Wheel</string>
+    <string name="watch_wheel_desc">Keep watching videos on the feed! Every %2$d seconds of active playback fills the wheel and adds +%1$d points to your wallet.</string>
+    <string name="watch_wheel_today_cycles">Today\'s Completed Spins</string>
+    <string name="watch_wheel_max_short">MAX</string>
+    <string name="watch_wheel_admin_title">Watch Earnings Wheel (While Browsing)</string>
+    <string name="watch_wheel_admin_toggle">Enable Watch Wheel on Home Feed</string>
+    <string name="watch_wheel_admin_cycle_sec">Cycle Duration (seconds)</string>
+    <string name="watch_wheel_admin_points">Points Per Cycle</string>
+    <string name="watch_wheel_admin_daily_cap">Daily Max Cycles</string>
+    <string name="watch_wheel_admin_save">Save Watch Wheel Config</string>
+    <string name="watch_wheel_reward_toast">Watch wheel complete! +%1$d points added to your wallet.</string>
 </resources>

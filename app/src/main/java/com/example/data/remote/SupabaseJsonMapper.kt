@@ -245,6 +245,10 @@ internal fun JSONObject.toAdminSettings(): AdminSettings = AdminSettings(
     minWithdrawalUsd = optDouble("min_withdrawal_usd", 10.0),
     rewardsEnabled = optBoolean("rewards_enabled", true),
     maxVideoDurationSec = optLong("max_video_duration_sec", 180L),
+    watchWheelEnabled = if (has("watch_wheel_enabled")) optBoolean("watch_wheel_enabled", true) else true,
+    watchWheelCycleSec = optLong("watch_wheel_cycle_sec", 30L).coerceIn(10L, 180L),
+    watchWheelPointsPerCycle = optLong("watch_wheel_points_per_cycle", 5L).coerceIn(1L, 500L),
+    watchWheelDailyCapCycles = optLong("watch_wheel_daily_cap_cycles", 60L).coerceIn(1L, 500L),
     updatedBy = optString("updated_by"),
     updatedAt = VyoraTimestamp.parse(optString("updated_at"))
 )

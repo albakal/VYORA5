@@ -38,14 +38,10 @@ class StorageMediaRepository(
         videoUri: Uri,
         customCoverUri: Uri? = null
     ): Flow<UploadStatus> = flow {
+        val ownerUid = resolveOwnerUid(userId)
         val fileId = UUID.randomUUID().toString()
         emit(UploadStatus.Progress(10))
 
-        val contentLength = withContext(Dispatchers.IO) {
-            runCatching {
-                context.contentResolver.openAssetFileDescriptor(videoUri, "r")?.use { it.length } ?: -1L
-            }.getOrDefault(-1L)
-        }
         val (contentHash, measuredSize) = withContext(Dispatchers.IO) {
             runCatching {
                 context.contentResolver.openInputStream(videoUri)?.use { stream ->
@@ -58,12 +54,11 @@ class StorageMediaRepository(
             return@flow
         }
 
-        val effectiveLength = if (contentLength > 0L) contentLength else measuredSize
         emit(UploadStatus.Progress(35))
         val videoUrl = try {
             supabase.uploadStorageStream(
-                objectPath = "videos/$userId/$fileId.mp4",
-                contentLength = effectiveLength,
+                objectPath = "videos/$ownerUid/$fileId.mp4",
+                contentLength = measuredSize,
                 contentType = context.contentResolver.getType(videoUri) ?: "video/mp4",
                 openStream = { context.contentResolver.openInputStream(videoUri) }
             )
@@ -71,7 +66,7 @@ class StorageMediaRepository(
             if (e is CancellationException) throw e
             emit(
                 UploadStatus.Failed(
-                    e.localizedMessage ?: "Video upload failed (verify Supabase Storage bucket vyora-media & RLS policies)"
+                    e.localizedMessage ?: "Video upload failed (verify Supabase Storage bucket ${supabase.storageBucket} & RLS policies)"
                 )
             )
             return@flow
@@ -89,7 +84,7 @@ class StorageMediaRepository(
         val thumbUrl = if (thumbBytes != null && thumbBytes.isNotEmpty()) {
             runCatching {
                 supabase.uploadStorageObject(
-                    objectPath = "thumbnails/$userId/$fileId.jpg",
+                    objectPath = "thumbnails/$ownerUid/$fileId.jpg",
                     bytes = thumbBytes,
                     contentType = "image/jpeg"
                 )
@@ -104,13 +99,16 @@ class StorageMediaRepository(
                 downloadUrl = videoUrl,
                 thumbnailUrl = thumbUrl,
                 contentHash = contentHash,
-                fileSizeBytes = effectiveLength.coerceAtLeast(0L)
+                fileSizeBytes = measuredSize.coerceAtLeast(0L)
             )
         )
     }
 
     suspend fun uploadImage(userId: String, folder: String, uri: Uri): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
+            val ownerUid = resolveOwnerUid(userId)
+            val cleanFolder = folder.trim().trim('/')
+            require(cleanFolder.isNotEmpty()) { "Invalid upload folder" }
             val rawBytes = readUriBytes(appContext, uri)
                 ?.takeIf { it.isNotEmpty() }
                 ?: throw IllegalStateException("تعذر قراءة ملف الصورة المختار")
@@ -120,7 +118,7 @@ class StorageMediaRepository(
             val ext = if (isJpeg) "jpg" else guessExtensionFromUri(appContext, uri)
             val mime = if (isJpeg) "image/jpeg" else (appContext.contentResolver.getType(uri) ?: "image/jpeg")
             supabase.uploadStorageObject(
-                objectPath = "$folder/$userId/${UUID.randomUUID()}.$ext",
+                objectPath = "$cleanFolder/$ownerUid/${UUID.randomUUID()}.$ext",
                 bytes = payload,
                 contentType = mime
             )
@@ -134,6 +132,9 @@ class StorageMediaRepository(
         extension: String
     ): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
+            val ownerUid = resolveOwnerUid(userId)
+            val cleanFolder = folder.trim().trim('/')
+            require(cleanFolder.isNotEmpty()) { "Invalid upload folder" }
             val bytes = readUriBytes(appContext, uri)
                 ?.takeIf { it.isNotEmpty() }
                 ?: throw IllegalStateException("Unable to read media file")
@@ -141,15 +142,22 @@ class StorageMediaRepository(
                 "mp4" -> "video/mp4"
                 "m4a" -> "audio/mp4"
                 "mp3" -> "audio/mpeg"
+                "png" -> "image/png"
+                "webp" -> "image/webp"
                 else -> "image/jpeg"
             }
             supabase.uploadStorageObject(
-                objectPath = "$folder/$userId/${UUID.randomUUID()}.$extension",
+                objectPath = "$cleanFolder/$ownerUid/${UUID.randomUUID()}.$extension",
                 bytes = bytes,
                 contentType = mimeType
             )
         }
     }
+
+    private fun resolveOwnerUid(fallbackUserId: String): String =
+        supabase.currentUser?.uid?.takeIf { it.isNotBlank() }
+            ?: fallbackUserId.trim().takeIf { it.isNotBlank() }
+            ?: throw IllegalStateException("User must be signed in.")
 
     private fun readUriBytes(context: Context, uri: Uri): ByteArray? = try {
         context.contentResolver.openInputStream(uri)?.use { it.readBytes() }

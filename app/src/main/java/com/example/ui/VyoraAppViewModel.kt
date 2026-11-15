@@ -43,6 +43,8 @@ import com.example.data.repository.VideoRepository
 import com.example.data.repository.WalletAdminRepository
 import com.example.security.DeviceIntegrityHelper
 import com.example.security.DeviceIntegrityInfo
+import com.example.ui.feed.WatchWheelLogic
+import com.example.ui.feed.WatchWheelUiState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -119,6 +121,9 @@ class VyoraAppViewModel(
 
     private val _isEarnBusy = MutableStateFlow(false)
     val isEarnBusy: StateFlow<Boolean> = _isEarnBusy.asStateFlow()
+
+    private val _watchWheelState = MutableStateFlow(WatchWheelUiState())
+    val watchWheelState: StateFlow<WatchWheelUiState> = _watchWheelState.asStateFlow()
 
     private var cachedDeviceIntegrity: DeviceIntegrityInfo? = null
     private var heartbeatJob: Job? = null
@@ -261,9 +266,21 @@ class VyoraAppViewModel(
                 }
 
                 refreshEarnDashboard()
+                refreshWatchWheelStatus()
                 if (adminStatus) {
                     refreshAdminEarnOverview()
                 }
+            }
+        }
+        viewModelScope.launch {
+            adminSettings.collect { cfg ->
+                _watchWheelState.value = _watchWheelState.value.copy(
+                    enabled = cfg.watchWheelEnabled,
+                    cycleSec = cfg.watchWheelCycleSec,
+                    pointsPerCycle = cfg.watchWheelPointsPerCycle,
+                    dailyCapCycles = cfg.watchWheelDailyCapCycles,
+                    elapsedMillis = if (cfg.watchWheelEnabled) _watchWheelState.value.elapsedMillis else 0L
+                )
             }
         }
     }
@@ -864,6 +881,115 @@ class VyoraAppViewModel(
     fun adminEndLiveStream(streamId: String) {
         viewModelScope.launch {
             liveRepo.endStream(streamId)
+        }
+    }
+
+    fun refreshWatchWheelStatus() {
+        viewModelScope.launch {
+            backendRepo.fetchWatchWheelStatus().onSuccess { status ->
+                _watchWheelState.value = _watchWheelState.value.copy(
+                    enabled = status.enabled,
+                    cycleSec = status.cycleSec,
+                    pointsPerCycle = status.pointsPerCycle,
+                    dailyCapCycles = status.dailyCapCycles,
+                    todayCycles = status.todayCycles
+                )
+            }
+        }
+    }
+
+    fun onFeedPlaybackTick(
+        videoId: String,
+        deltaMillis: Long,
+        isScreenActive: Boolean,
+        isVideoPlaying: Boolean
+    ) {
+        val current = _watchWheelState.value
+        val settings = adminSettings.value
+        val effectiveEnabled = settings.watchWheelEnabled && current.enabled
+        val outcome = WatchWheelLogic.advanceTick(
+            currentElapsedMillis = current.elapsedMillis,
+            deltaMillis = deltaMillis,
+            cycleSec = settings.watchWheelCycleSec,
+            isEnabled = effectiveEnabled,
+            isScreenActive = isScreenActive,
+            isVideoPlaying = isVideoPlaying,
+            isClaiming = current.isClaiming,
+            isDailyCapReached = current.dailyCapReached
+        )
+        _watchWheelState.value = current.copy(
+            enabled = effectiveEnabled,
+            cycleSec = settings.watchWheelCycleSec,
+            pointsPerCycle = settings.watchWheelPointsPerCycle,
+            dailyCapCycles = settings.watchWheelDailyCapCycles,
+            elapsedMillis = outcome.nextElapsedMillis,
+            isActivelyPlaying = effectiveEnabled && isScreenActive && isVideoPlaying
+        )
+        if (outcome.cycleCompleted) {
+            claimWatchWheelCycle(videoId, outcome.completedWatchSeconds)
+        }
+    }
+
+    private fun claimWatchWheelCycle(videoId: String, watchedSec: Long) {
+        if (_watchWheelState.value.isClaiming) return
+        viewModelScope.launch {
+            _watchWheelState.value = _watchWheelState.value.copy(isClaiming = true)
+            backendRepo.claimWatchWheelReward(videoId = videoId, watchedSec = watchedSec)
+                .onSuccess { res ->
+                    _watchWheelState.value = _watchWheelState.value.copy(
+                        isClaiming = false,
+                        todayCycles = res.todayCycles,
+                        dailyCapCycles = res.dailyCapCycles,
+                        lastAwardedPoints = if (res.awarded && res.pointsDelta > 0L) res.pointsDelta else null,
+                        statusNotice = when {
+                            res.reason == "daily_cap_reached" -> "تم الوصول للحد اليومي لعجلة المشاهدة"
+                            res.reason == "disabled" -> "تم إيقاف عجلة الربح من الإدارة"
+                            else -> ""
+                        }
+                    )
+                    if (res.awarded && res.pointsDelta > 0L) {
+                        delay(2400L)
+                        _watchWheelState.value = _watchWheelState.value.copy(lastAwardedPoints = null)
+                    }
+                }
+                .onFailure { err ->
+                    Log.w(TAG, "Watch wheel claim error", err)
+                    _watchWheelState.value = _watchWheelState.value.copy(
+                        isClaiming = false,
+                        statusNotice = err.localizedMessage.orEmpty()
+                    )
+                }
+        }
+    }
+
+    fun adminUpdateWatchWheelSettings(
+        enabled: Boolean,
+        cycleSec: Long = adminSettings.value.watchWheelCycleSec,
+        pointsPerCycle: Long = adminSettings.value.watchWheelPointsPerCycle,
+        dailyCapCycles: Long = adminSettings.value.watchWheelDailyCapCycles
+    ) {
+        viewModelScope.launch {
+            walletAdminRepo.updateWatchWheelSettings(
+                enabled = enabled,
+                cycleSec = cycleSec,
+                pointsPerCycle = pointsPerCycle,
+                dailyCapCycles = dailyCapCycles
+            ).onSuccess {
+                _watchWheelState.value = _watchWheelState.value.copy(
+                    enabled = enabled,
+                    cycleSec = cycleSec.coerceIn(10L, 180L),
+                    pointsPerCycle = pointsPerCycle.coerceIn(1L, 500L),
+                    dailyCapCycles = dailyCapCycles.coerceIn(1L, 500L),
+                    elapsedMillis = if (enabled) _watchWheelState.value.elapsedMillis else 0L
+                )
+                _toastMessage.value = if (enabled) {
+                    "تم تشغيل عجلة الربح من المشاهدات"
+                } else {
+                    "تم إيقاف عجلة الربح من المشاهدات"
+                }
+            }.onFailure { err ->
+                _toastMessage.value = err.localizedMessage ?: "تعذر تحديث إعدادات عجلة الربح"
+            }
         }
     }
 

@@ -90,7 +90,7 @@ class SupabaseClient private constructor(
         get() = BuildConfig.SUPABASE_PUBLISHABLE_KEY.trim()
 
     val storageBucket: String
-        get() = BuildConfig.SUPABASE_STORAGE_BUCKET.trim().ifBlank { "vyora-media" }
+        get() = sanitizeBucketName(BuildConfig.SUPABASE_STORAGE_BUCKET)
 
     val isConfigured: Boolean
         get() = isConfigValid(baseUrl, publishableKey)
@@ -404,6 +404,9 @@ class SupabaseClient private constructor(
         contentType: String
     ): String = withContext(Dispatchers.IO) {
         requireConfigured()
+        if (bytes.isEmpty()) {
+            throw SupabaseException(400, "Upload payload is empty.")
+        }
         val authToken = requireUserBearerToken()
         val cleanPath = encodeStoragePath(objectPath)
         val req = Request.Builder()
@@ -418,7 +421,7 @@ class SupabaseClient private constructor(
         httpClient.newCall(req).execute().use { resp ->
             val raw = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) {
-                throw SupabaseException(resp.code, parseSupabaseError(raw, resp.code))
+                throw SupabaseException(resp.code, formatStorageError(raw, resp.code, storageBucket))
             }
             "$baseUrl/storage/v1/object/public/$storageBucket/$cleanPath"
         }
@@ -462,7 +465,7 @@ class SupabaseClient private constructor(
         httpClient.newCall(req).execute().use { resp ->
             val raw = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) {
-                throw SupabaseException(resp.code, parseSupabaseError(raw, resp.code))
+                throw SupabaseException(resp.code, formatStorageError(raw, resp.code, storageBucket))
             }
             "$baseUrl/storage/v1/object/public/$storageBucket/$cleanPath"
         }
@@ -634,7 +637,19 @@ class SupabaseClient private constructor(
         }
     }
 
+    private fun formatStorageError(raw: String, code: Int, bucket: String): String {
+        val baseMsg = parseSupabaseError(raw, code)
+        return when {
+            baseMsg.contains("Bucket not found", ignoreCase = true) || code == 404 ->
+                "Storage bucket '$bucket' not found. Run supabase/schema.sql in Supabase SQL Editor."
+            baseMsg.contains("row-level security", ignoreCase = true) || code == 403 ->
+                "Storage RLS blocked upload to '$bucket'. Ensure supabase/schema.sql policies are applied."
+            else -> baseMsg
+        }
+    }
+
     companion object {
+        const val DEFAULT_STORAGE_BUCKET = "vyora-media"
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
 
         @Volatile
@@ -647,6 +662,17 @@ class SupabaseClient private constructor(
         }
 
         fun currentInstanceOrNull(): SupabaseClient? = instance
+
+        fun sanitizeBucketName(raw: String?): String {
+            val cleaned = raw.orEmpty()
+                .trim()
+                .trim('"', '\'', '/')
+            return if (cleaned.isBlank() || cleaned.contains("YOUR_", ignoreCase = true)) {
+                DEFAULT_STORAGE_BUCKET
+            } else {
+                cleaned
+            }
+        }
 
         fun isConfigValid(url: String, key: String): Boolean {
             val cleanUrl = url.trim().trimEnd('/')

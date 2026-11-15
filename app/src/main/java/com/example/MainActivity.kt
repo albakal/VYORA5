@@ -346,7 +346,8 @@ private fun VyoraAuthenticatedApp(
                         onOpenLiveLobby = { navController.navigate(VyoraRoutes.LIVE_LOBBY) },
                         onOpenUserProfile = { uid -> navController.navigate(VyoraRoutes.userProfile(uid)) },
                         onOpenSoundDetail = { id, title -> navController.navigate(VyoraRoutes.sound(id, title)) },
-                        onOpenCreate = { navController.navigate(VyoraRoutes.CREATE) }
+                        onOpenCreate = { navController.navigate(VyoraRoutes.CREATE) },
+                        onOpenWallet = { navController.navigate(VyoraRoutes.WALLET) }
                     )
                 }
 

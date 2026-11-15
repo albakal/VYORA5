@@ -282,13 +282,16 @@ CREATE TABLE IF NOT EXISTS public.vyora_wallet_transactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     external_ref TEXT UNIQUE,
     user_id TEXT NOT NULL,
-    tx_type TEXT NOT NULL CHECK (tx_type IN ('view_reward', 'creator_bonus', 'withdrawal', 'adjustment')),
+    tx_type TEXT NOT NULL CHECK (tx_type IN ('view_reward', 'watch_wheel', 'creator_bonus', 'withdrawal', 'adjustment')),
     points_delta BIGINT NOT NULL,
     amount_delta NUMERIC(12, 4) NOT NULL,
     description TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'completed' CHECK (status IN ('completed', 'pending', 'rejected')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE public.vyora_wallet_transactions DROP CONSTRAINT IF EXISTS vyora_wallet_transactions_tx_type_check;
+ALTER TABLE public.vyora_wallet_transactions ADD CONSTRAINT vyora_wallet_transactions_tx_type_check
+    CHECK (tx_type IN ('view_reward', 'watch_wheel', 'creator_bonus', 'withdrawal', 'adjustment'));
 CREATE INDEX IF NOT EXISTS idx_vyora_wallet_tx_user_created ON public.vyora_wallet_transactions(user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS public.vyora_withdrawal_requests (
@@ -311,11 +314,34 @@ CREATE TABLE IF NOT EXISTS public.vyora_admin_settings (
     min_withdrawal_usd DOUBLE PRECISION NOT NULL DEFAULT 10.0,
     rewards_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     max_video_duration_sec BIGINT NOT NULL DEFAULT 180,
+    watch_wheel_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    watch_wheel_cycle_sec BIGINT NOT NULL DEFAULT 30,
+    watch_wheel_points_per_cycle BIGINT NOT NULL DEFAULT 5,
+    watch_wheel_daily_cap_cycles BIGINT NOT NULL DEFAULT 60,
     updated_by TEXT NOT NULL DEFAULT '',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE public.vyora_admin_settings ADD COLUMN IF NOT EXISTS watch_wheel_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE public.vyora_admin_settings ADD COLUMN IF NOT EXISTS watch_wheel_cycle_sec BIGINT NOT NULL DEFAULT 30;
+ALTER TABLE public.vyora_admin_settings ADD COLUMN IF NOT EXISTS watch_wheel_points_per_cycle BIGINT NOT NULL DEFAULT 5;
+ALTER TABLE public.vyora_admin_settings ADD COLUMN IF NOT EXISTS watch_wheel_daily_cap_cycles BIGINT NOT NULL DEFAULT 60;
+
 INSERT INTO public.vyora_admin_settings (id) VALUES ('global') ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS public.vyora_watch_wheel_cycles (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    cairo_date DATE NOT NULL,
+    cycle_index BIGINT NOT NULL CHECK (cycle_index >= 1),
+    video_id TEXT NOT NULL DEFAULT '',
+    points_awarded BIGINT NOT NULL DEFAULT 0 CHECK (points_awarded >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, cairo_date, cycle_index)
+);
+CREATE INDEX IF NOT EXISTS idx_vyora_watch_wheel_user_date
+    ON public.vyora_watch_wheel_cycles(user_id, cairo_date DESC, created_at DESC);
+ALTER TABLE public.vyora_watch_wheel_cycles ENABLE ROW LEVEL SECURITY;
 
 CREATE TABLE IF NOT EXISTS public.vyora_admin_roles (
     user_id TEXT PRIMARY KEY,
@@ -2625,13 +2651,229 @@ CREATE POLICY "Own or admin daily activity readable" ON public.vyora_earn_daily_
 DROP POLICY IF EXISTS "Own or admin earn payout logs readable" ON public.vyora_earn_payout_logs;
 CREATE POLICY "Own or admin earn payout logs readable" ON public.vyora_earn_payout_logs FOR SELECT TO authenticated USING (auth.uid()::text = user_id OR public.vyora_is_admin());
 
+DROP POLICY IF EXISTS "Own watch wheel cycles readable" ON public.vyora_watch_wheel_cycles;
+CREATE POLICY "Own watch wheel cycles readable" ON public.vyora_watch_wheel_cycles FOR SELECT TO authenticated USING (auth.uid()::text = user_id OR public.vyora_is_admin());
+
+-- ============================================================================
+-- Watch Earnings Wheel RPCs
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.vyora_get_watch_wheel_status()
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_uid TEXT := auth.uid()::text;
+    v_today DATE := (NOW() AT TIME ZONE 'Africa/Cairo')::date;
+    v_settings public.vyora_admin_settings%ROWTYPE;
+    v_today_cycles BIGINT := 0;
+BEGIN
+    SELECT * INTO v_settings FROM public.vyora_admin_settings WHERE id = 'global';
+    IF v_uid IS NOT NULL AND v_uid <> '' THEN
+        SELECT COALESCE(COUNT(*), 0) INTO v_today_cycles
+        FROM public.vyora_watch_wheel_cycles
+        WHERE user_id = v_uid AND cairo_date = v_today;
+    END IF;
+    RETURN jsonb_build_object(
+        'enabled', COALESCE(v_settings.watch_wheel_enabled, TRUE),
+        'cycleSec', GREATEST(10, COALESCE(v_settings.watch_wheel_cycle_sec, 30)),
+        'pointsPerCycle', GREATEST(1, COALESCE(v_settings.watch_wheel_points_per_cycle, 5)),
+        'dailyCapCycles', GREATEST(1, COALESCE(v_settings.watch_wheel_daily_cap_cycles, 60)),
+        'todayCycles', v_today_cycles
+    );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.vyora_claim_watch_wheel_reward(
+    p_video_id TEXT DEFAULT '',
+    p_watched_sec BIGINT DEFAULT 30
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_uid TEXT := auth.uid()::text;
+    v_today DATE := (NOW() AT TIME ZONE 'Africa/Cairo')::date;
+    v_settings public.vyora_admin_settings%ROWTYPE;
+    v_today_cycles BIGINT := 0;
+    v_next_cycle BIGINT := 1;
+    v_cycle_sec BIGINT;
+    v_points_per_cycle BIGINT;
+    v_daily_cap BIGINT;
+    v_last_claim TIMESTAMPTZ;
+    v_amount_delta NUMERIC(12, 4);
+    v_ref TEXT;
+    v_wallet_points BIGINT := 0;
+BEGIN
+    IF v_uid IS NULL OR v_uid = '' THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+
+    INSERT INTO public.vyora_admin_settings (id) VALUES ('global') ON CONFLICT (id) DO NOTHING;
+    SELECT * INTO v_settings FROM public.vyora_admin_settings WHERE id = 'global';
+
+    v_cycle_sec := GREATEST(10, COALESCE(v_settings.watch_wheel_cycle_sec, 30));
+    v_points_per_cycle := GREATEST(1, COALESCE(v_settings.watch_wheel_points_per_cycle, 5));
+    v_daily_cap := GREATEST(1, COALESCE(v_settings.watch_wheel_daily_cap_cycles, 60));
+
+    SELECT COALESCE(COUNT(*), 0), MAX(created_at)
+    INTO v_today_cycles, v_last_claim
+    FROM public.vyora_watch_wheel_cycles
+    WHERE user_id = v_uid AND cairo_date = v_today;
+
+    INSERT INTO public.vyora_wallets (user_id, points, balance_usd, total_earned_usd)
+    VALUES (v_uid, 0, 0, 0)
+    ON CONFLICT (user_id) DO NOTHING;
+
+    SELECT points INTO v_wallet_points FROM public.vyora_wallets WHERE user_id = v_uid;
+
+    IF NOT COALESCE(v_settings.watch_wheel_enabled, TRUE) THEN
+        RETURN jsonb_build_object(
+            'awarded', FALSE,
+            'reason', 'disabled',
+            'pointsDelta', 0,
+            'todayCycles', v_today_cycles,
+            'dailyCapCycles', v_daily_cap,
+            'walletPoints', v_wallet_points
+        );
+    END IF;
+
+    IF v_today_cycles >= v_daily_cap THEN
+        RETURN jsonb_build_object(
+            'awarded', FALSE,
+            'reason', 'daily_cap_reached',
+            'pointsDelta', 0,
+            'todayCycles', v_today_cycles,
+            'dailyCapCycles', v_daily_cap,
+            'walletPoints', v_wallet_points
+        );
+    END IF;
+
+    IF COALESCE(p_watched_sec, 0) < GREATEST(8, v_cycle_sec - 2) THEN
+        RETURN jsonb_build_object(
+            'awarded', FALSE,
+            'reason', 'insufficient_watch_time',
+            'pointsDelta', 0,
+            'todayCycles', v_today_cycles,
+            'dailyCapCycles', v_daily_cap,
+            'walletPoints', v_wallet_points
+        );
+    END IF;
+
+    IF v_last_claim IS NOT NULL AND EXTRACT(EPOCH FROM (NOW() - v_last_claim)) < GREATEST(8, v_cycle_sec - 4) THEN
+        RETURN jsonb_build_object(
+            'awarded', FALSE,
+            'reason', 'cooldown',
+            'pointsDelta', 0,
+            'todayCycles', v_today_cycles,
+            'dailyCapCycles', v_daily_cap,
+            'walletPoints', v_wallet_points
+        );
+    END IF;
+
+    v_next_cycle := v_today_cycles + 1;
+    v_ref := 'wheel:' || v_uid || ':' || v_today::text || ':' || v_next_cycle::text;
+    v_amount_delta := ROUND((v_points_per_cycle * COALESCE(v_settings.point_value_usd, 0.01))::numeric, 4);
+
+    INSERT INTO public.vyora_watch_wheel_cycles (
+        id, user_id, cairo_date, cycle_index, video_id, points_awarded
+    )
+    VALUES (
+        v_ref, v_uid, v_today, v_next_cycle, COALESCE(p_video_id, ''), v_points_per_cycle
+    )
+    ON CONFLICT (user_id, cairo_date, cycle_index) DO NOTHING;
+
+    UPDATE public.vyora_wallets
+    SET points = points + v_points_per_cycle,
+        balance_usd = balance_usd + v_amount_delta,
+        total_earned_usd = total_earned_usd + v_amount_delta,
+        updated_at = NOW()
+    WHERE user_id = v_uid
+    RETURNING points INTO v_wallet_points;
+
+    INSERT INTO public.vyora_wallet_transactions (
+        external_ref, user_id, tx_type, points_delta, amount_delta, description, status
+    )
+    VALUES (
+        v_ref,
+        v_uid,
+        'watch_wheel',
+        v_points_per_cycle,
+        v_amount_delta,
+        'Watch wheel reward cycle #' || v_next_cycle::text,
+        'completed'
+    )
+    ON CONFLICT (external_ref) DO NOTHING;
+
+    RETURN jsonb_build_object(
+        'awarded', TRUE,
+        'reason', 'credited',
+        'pointsDelta', v_points_per_cycle,
+        'amountDelta', v_amount_delta,
+        'todayCycles', v_next_cycle,
+        'dailyCapCycles', v_daily_cap,
+        'walletPoints', v_wallet_points
+    );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.vyora_admin_update_watch_wheel(
+    p_enabled BOOLEAN,
+    p_cycle_sec BIGINT DEFAULT 30,
+    p_points_per_cycle BIGINT DEFAULT 5,
+    p_daily_cap_cycles BIGINT DEFAULT 60
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_uid TEXT := auth.uid()::text;
+BEGIN
+    IF NOT public.vyora_is_admin() THEN
+        RAISE EXCEPTION 'Admin privileges required';
+    END IF;
+
+    INSERT INTO public.vyora_admin_settings (
+        id, watch_wheel_enabled, watch_wheel_cycle_sec,
+        watch_wheel_points_per_cycle, watch_wheel_daily_cap_cycles,
+        updated_by, updated_at
+    )
+    VALUES (
+        'global',
+        COALESCE(p_enabled, TRUE),
+        LEAST(180, GREATEST(10, COALESCE(p_cycle_sec, 30))),
+        LEAST(500, GREATEST(1, COALESCE(p_points_per_cycle, 5))),
+        LEAST(500, GREATEST(1, COALESCE(p_daily_cap_cycles, 60))),
+        v_uid,
+        NOW()
+    )
+    ON CONFLICT (id) DO UPDATE
+    SET watch_wheel_enabled = EXCLUDED.watch_wheel_enabled,
+        watch_wheel_cycle_sec = EXCLUDED.watch_wheel_cycle_sec,
+        watch_wheel_points_per_cycle = EXCLUDED.watch_wheel_points_per_cycle,
+        watch_wheel_daily_cap_cycles = EXCLUDED.watch_wheel_daily_cap_cycles,
+        updated_by = v_uid,
+        updated_at = NOW();
+END;
+$$;
+
 -- ============================================================================
 -- Supabase Storage Bucket & Policies (vyora-media)
 -- ============================================================================
 
-INSERT INTO storage.buckets (id, name, public)
-VALUES ('vyora-media', 'vyora-media', TRUE)
-ON CONFLICT (id) DO UPDATE SET public = TRUE;
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('vyora-media', 'vyora-media', TRUE, NULL, NULL)
+ON CONFLICT (id) DO UPDATE
+SET name = EXCLUDED.name,
+    public = TRUE,
+    file_size_limit = NULL,
+    allowed_mime_types = NULL;
 
 DROP POLICY IF EXISTS "Public read vyora-media" ON storage.objects;
 CREATE POLICY "Public read vyora-media"
@@ -2653,6 +2895,10 @@ CREATE POLICY "Authenticated update own vyora-media"
     ON storage.objects FOR UPDATE
     TO authenticated
     USING (
+        bucket_id = 'vyora-media'
+        AND ((storage.foldername(name))[2] = auth.uid()::text OR owner = auth.uid())
+    )
+    WITH CHECK (
         bucket_id = 'vyora-media'
         AND ((storage.foldername(name))[2] = auth.uid()::text OR owner = auth.uid())
     );
