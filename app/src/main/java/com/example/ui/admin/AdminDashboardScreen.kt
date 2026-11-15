@@ -136,7 +136,8 @@ fun AdminDashboardScreen(
                 vString(R.string.admin_users),
                 vString(R.string.admin_reports),
                 vString(R.string.admin_withdrawals),
-                vString(R.string.admin_settings_tab)
+                vString(R.string.admin_settings_tab),
+                vString(R.string.admin_earn_tab)
             )
             ScrollableTabRow(selectedTabIndex = selectedTab, edgePadding = 12.dp) {
                 tabs.forEachIndexed { idx, label ->
@@ -488,7 +489,7 @@ fun AdminDashboardScreen(
                     }
                 }
 
-                else -> {
+                4 -> {
                     var pointValue by remember(settings.pointValueUsd) { mutableStateOf(settings.pointValueUsd.toString()) }
                     var minWithdraw by remember(settings.minWithdrawalUsd) { mutableStateOf(settings.minWithdrawalUsd.toString()) }
                     var maxDuration by remember(settings.maxVideoDurationSec) { mutableStateOf(settings.maxVideoDurationSec.toString()) }
@@ -640,6 +641,10 @@ fun AdminDashboardScreen(
                             }
                         }
                     }
+                }
+
+                else -> {
+                    AdminEarnSection(viewModel = viewModel)
                 }
             }
         }

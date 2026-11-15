@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudSync
@@ -84,7 +85,8 @@ import java.util.Locale
 @Composable
 fun WalletScreen(
     viewModel: VyoraAppViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenEarnWithUs: () -> Unit = {}
 ) {
     val wallet by viewModel.wallet.collectAsStateWithLifecycle()
     val transactions by viewModel.transactions.collectAsStateWithLifecycle()
@@ -204,6 +206,40 @@ fun WalletScreen(
                             style = MaterialTheme.typography.labelMedium,
                             color = Color.White.copy(alpha = 0.9f)
                         )
+                    }
+                }
+            }
+
+            item {
+                Card(
+                    shape = MaterialTheme.shapes.large,
+                    colors = CardDefaults.cardColors(containerColor = PulseMagenta.copy(alpha = 0.14f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenEarnWithUs() }
+                        .testTag("wallet_earn_banner")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Filled.CardGiftcard, contentDescription = null, tint = PulseMagenta)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = vString(R.string.earn_program_title),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = vString(R.string.earn_program_subtitle),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        TextButton(onClick = onOpenEarnWithUs) {
+                            Text(vString(R.string.earn_open_cta))
+                        }
                     }
                 }
             }

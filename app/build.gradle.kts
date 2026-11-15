@@ -117,6 +117,10 @@ dependencies {
   // Agora RTC SDK for interactive live streaming
   implementation(libs.agora.rtc)
 
+  // Device integrity & anti-fraud protection (App Set ID & Play Integrity)
+  implementation(libs.play.services.appset)
+  implementation(libs.play.integrity)
+
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
   // implementation(libs.logging.interceptor)

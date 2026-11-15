@@ -38,6 +38,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -56,6 +57,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
@@ -69,6 +73,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.data.preferences.AppPreferences
 import com.example.data.preferences.AppPreferencesRepository
+import com.example.data.remote.EarnProgramRepository
 import com.example.data.remote.StorageMediaRepository
 import com.example.data.remote.SupabaseBackendRepository
 import com.example.data.remote.SupabaseClient
@@ -79,12 +84,14 @@ import com.example.data.repository.UserRepository
 import com.example.data.repository.VideoRepository
 import com.example.data.repository.WalletAdminRepository
 import com.example.media.LocalNotificationHelper
+import com.example.security.DeviceIntegrityHelper
 import com.example.ui.VyoraAppViewModel
 import com.example.ui.admin.AdminDashboardScreen
 import com.example.ui.auth.AuthScreen
 import com.example.ui.auth.restoreSupabaseSession
 import com.example.ui.discover.DiscoverSearchScreen
 import com.example.ui.discover.SoundDetailScreen
+import com.example.ui.earn.EarnWithUsScreen
 import com.example.ui.feed.HomeFeedScreen
 import com.example.ui.friends.FriendsScreen
 import com.example.ui.live.LiveLobbyScreen
@@ -111,6 +118,7 @@ object VyoraRoutes {
     const val DISCOVER = "discover"
     const val NOTIFICATIONS = "notifications"
     const val WALLET = "wallet"
+    const val EARN_WITH_US = "earn_with_us"
     const val ADMIN = "admin"
     const val LIVE_LOBBY = "live_lobby"
     const val LIVE_ROOM = "live_room/{streamId}/{isHost}"
@@ -152,7 +160,11 @@ class MainActivity : ComponentActivity() {
                             val nextLang = if (prefs.language == "ar") "en" else "ar"
                             scope.launch { prefsRepo.setLanguage(nextLang) }
                         },
-                        onAuthSuccess = {}
+                        onAuthSuccess = {},
+                        initialReferralCode = prefs.pendingReferralCode,
+                        onReferralCodeChanged = { code ->
+                            scope.launch { prefsRepo.setPendingReferralCode(code) }
+                        }
                     )
                 } else {
                     key(user.uid) {
@@ -172,7 +184,10 @@ class MainActivity : ComponentActivity() {
                                         notifRepo = NotificationRepository(client),
                                         walletAdminRepo = WalletAdminRepository(client),
                                         storageRepo = StorageMediaRepository(appCtx, client),
-                                        backendRepo = SupabaseBackendRepository(client)
+                                        backendRepo = SupabaseBackendRepository(client),
+                                        earnRepo = EarnProgramRepository(client),
+                                        deviceIntegrityHelper = DeviceIntegrityHelper(appCtx),
+                                        prefsRepo = prefsRepo
                                     )
                                 }
                             }
@@ -209,6 +224,7 @@ private fun VyoraAuthenticatedApp(
     onChangeTheme: (String) -> Unit
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
@@ -216,6 +232,24 @@ private fun VyoraAuthenticatedApp(
     val snackbarHostState = remember { SnackbarHostState() }
     val toastMessage by viewModel.toastMessage.collectAsStateWithLifecycle()
     val notifications by viewModel.notifications.collectAsStateWithLifecycle()
+
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> viewModel.onAppForegroundChanged(true)
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> viewModel.onAppForegroundChanged(false)
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            viewModel.onAppForegroundChanged(true)
+        }
+        onDispose {
+            viewModel.onAppForegroundChanged(false)
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     val notifPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -342,7 +376,8 @@ private fun VyoraAuthenticatedApp(
                         onOpenWallet = { navController.navigate(VyoraRoutes.WALLET) },
                         onOpenAdmin = { navController.navigate(VyoraRoutes.ADMIN) },
                         onOpenNotifications = { navController.navigate(VyoraRoutes.NOTIFICATIONS) },
-                        onOpenChat = { convId, peerId -> navController.navigate(VyoraRoutes.chat(convId, peerId)) }
+                        onOpenChat = { convId, peerId -> navController.navigate(VyoraRoutes.chat(convId, peerId)) },
+                        onOpenEarnWithUs = { navController.navigate(VyoraRoutes.EARN_WITH_US) }
                     )
                 }
 
@@ -376,6 +411,14 @@ private fun VyoraAuthenticatedApp(
 
                 composable(VyoraRoutes.WALLET) {
                     WalletScreen(
+                        viewModel = viewModel,
+                        onBack = { navController.popBackStack() },
+                        onOpenEarnWithUs = { navController.navigate(VyoraRoutes.EARN_WITH_US) }
+                    )
+                }
+
+                composable(VyoraRoutes.EARN_WITH_US) {
+                    EarnWithUsScreen(
                         viewModel = viewModel,
                         onBack = { navController.popBackStack() }
                     )

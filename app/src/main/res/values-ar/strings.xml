@@ -158,4 +158,45 @@
     <string name="approve">موافقة</string>
     <string name="dismiss">تجاهل</string>
     <string name="remove_content">حذف الفيديو</string>
+    <string name="admin_earn_tab">اربح معنا</string>
+
+    <!-- Earn With Us Program -->
+    <string name="earn_program_title">اربح معنا – برنامج المكافآت</string>
+    <string name="earn_program_subtitle">انشر 10 فيديوهات وادعُ 10 أصدقاء واربح نقاط تعادل 1500 جنيه</string>
+    <string name="earn_open_cta">افتح برنامج المكافآت</string>
+    <string name="earn_reward_amount">المكافأة المستهدفة: %1$s جنيه</string>
+    <string name="earn_reward_points">تعادل %1$s نقطة</string>
+    <string name="earn_status_in_progress">قيد التنفيذ</string>
+    <string name="earn_status_under_review">قيد المراجعة</string>
+    <string name="earn_status_eligible">مستحقة</string>
+    <string name="earn_status_approved">تم اعتمادها</string>
+    <string name="earn_status_rejected">مرفوضة</string>
+    <string name="earn_paused_banner">برنامج اربح معنا متوقف مؤقتاً من قبل الإدارة حالياً.</string>
+    <string name="earn_personal_videos">الفيديوهات الشخصية</string>
+    <string name="earn_invited_friends">الأصدقاء المسجلون بكودك</string>
+    <string name="earn_completed_friends">الأصدقاء المكتملون</string>
+    <string name="earn_my_daily_usage">نشاطك اليومي (توقيت مصر)</string>
+    <string name="earn_referral_code_title">كود الإحالة الخاص بك</string>
+    <string name="earn_copy_code">نسخ الكود</string>
+    <string name="earn_share_invite">مشاركة الدعوة</string>
+    <string name="earn_code_copied">تم نسخ كود الإحالة!</string>
+    <string name="earn_share_message">سجّل في تطبيق VYORA واستخدم كود الدعوة الخاص بي %1$s أثناء التسجيل!</string>
+    <string name="earn_redeem_title">هل لديك كود دعوة من صديق؟</string>
+    <string name="earn_redeem_hint">أدخل كود الإحالة (يُستخدم مرة واحدة فقط)</string>
+    <string name="earn_redeem_submit">تفعيل الكود</string>
+    <string name="earn_redeemed_badge">مرتبط بكود الإحالة: %1$s</string>
+    <string name="earn_friends_progress_title">متابعة الأصدقاء المدعوين (%1$d/%2$d)</string>
+    <string name="earn_no_friends_yet">لم يسجل أي صديق بكودك بعد. شارك كودك للبدء!</string>
+    <string name="earn_friend_days">الأيام المتتالية: %1$d من %2$d</string>
+    <string name="earn_friend_minutes">الاستخدام اليوم: %1$d من %2$d دقيقة</string>
+    <string name="earn_friend_videos">فيديوهات اليوم: %1$d من %2$d</string>
+    <string name="earn_friend_completed">مكتمل</string>
+    <string name="earn_friend_under_review">الجهاز قيد المراجعة</string>
+    <string name="earn_security_notice">حساب واحد مؤهل للمكافأة لكل هاتف. الأجهزة العائلية المشتركة تخضع لمراجعة الإدارة.</string>
+    <string name="earn_auth_referral_label">كود الإحالة من صديق (اختياري)</string>
+    <string name="earn_admin_enable_toggle">تفعيل برنامج اربح معنا</string>
+    <string name="earn_admin_suspicious_devices">الأجهزة المشبوهة / المشتركة</string>
+    <string name="earn_admin_approve_exception">اعتماد استثناء عائلي</string>
+    <string name="earn_admin_block_device">حظر الجهاز</string>
+    <string name="earn_admin_payout_logs">سجل اعتماد وصرف المكافآت</string>
 </resources>

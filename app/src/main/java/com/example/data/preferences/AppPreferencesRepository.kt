@@ -11,17 +11,20 @@ private val Context.dataStore by preferencesDataStore(name = "vyora_prefs")
 
 data class AppPreferences(
     val language: String = "ar",
-    val themeMode: String = "dark"
+    val themeMode: String = "dark",
+    val pendingReferralCode: String = ""
 )
 
 class AppPreferencesRepository(private val context: Context) {
     private val keyLanguage = stringPreferencesKey("language")
     private val keyTheme = stringPreferencesKey("theme_mode")
+    private val keyPendingReferral = stringPreferencesKey("pending_referral_code")
 
     val preferencesFlow: Flow<AppPreferences> = context.dataStore.data.map { prefs ->
         AppPreferences(
             language = prefs[keyLanguage] ?: "ar",
-            themeMode = prefs[keyTheme] ?: "dark"
+            themeMode = prefs[keyTheme] ?: "dark",
+            pendingReferralCode = prefs[keyPendingReferral].orEmpty()
         )
     }
 
@@ -31,5 +34,13 @@ class AppPreferencesRepository(private val context: Context) {
 
     suspend fun setThemeMode(themeMode: String) {
         context.dataStore.edit { it[keyTheme] = themeMode }
+    }
+
+    suspend fun setPendingReferralCode(code: String) {
+        context.dataStore.edit { it[keyPendingReferral] = code.trim().uppercase() }
+    }
+
+    suspend fun clearPendingReferralCode() {
+        context.dataStore.edit { it.remove(keyPendingReferral) }
     }
 }

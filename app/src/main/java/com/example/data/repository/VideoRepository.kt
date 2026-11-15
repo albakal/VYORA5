@@ -125,7 +125,9 @@ class VideoRepository(
         caption: String,
         soundId: String,
         soundTitle: String,
-        durationSec: Long
+        durationSec: Long,
+        contentHash: String = "",
+        fileSizeBytes: Long = 0L
     ): Result<String> = runCatching {
         requireUid()
         val hashtags = Regex("#([\\p{L}0-9_]+)")
@@ -135,18 +137,32 @@ class VideoRepository(
             .take(15)
             .toList()
 
-        val videoId = supabase.rpc(
-            "vyora_publish_video",
-            JSONObject().apply {
-                put("p_video_url", videoUrl)
-                put("p_thumbnail_url", thumbnailUrl)
-                put("p_caption", caption.take(500))
-                put("p_hashtags", JSONArray(hashtags))
-                put("p_sound_id", soundId)
-                put("p_sound_title", soundTitle.ifBlank { "Original Sound - ${creator.username}" }.take(120))
-                put("p_duration_sec", durationSec.coerceIn(1L, 300L))
+        val baseParams = JSONObject().apply {
+            put("p_video_url", videoUrl)
+            put("p_thumbnail_url", thumbnailUrl)
+            put("p_caption", caption.take(500))
+            put("p_hashtags", JSONArray(hashtags))
+            put("p_sound_id", soundId)
+            put("p_sound_title", soundTitle.ifBlank { "Original Sound - ${creator.username}" }.take(120))
+            put("p_duration_sec", durationSec.coerceIn(1L, 300L))
+        }
+        val extendedParams = JSONObject(baseParams.toString()).apply {
+            put("p_content_hash", contentHash)
+            put("p_file_size_bytes", fileSizeBytes.coerceAtLeast(0L))
+        }
+
+        val rawResponse = runCatching {
+            supabase.rpc("vyora_publish_video", extendedParams)
+        }.getOrElse { firstErr ->
+            if (firstErr is CancellationException) throw firstErr
+            val msg = firstErr.localizedMessage.orEmpty()
+            if (msg.contains("PGRST202") || msg.contains("function", ignoreCase = true)) {
+                supabase.rpc("vyora_publish_video", baseParams)
+            } else {
+                throw firstErr
             }
-        ).trim().trim('"')
+        }
+        val videoId = rawResponse.trim().trim('"')
         require(videoId.isNotBlank()) { "Server did not return a valid video ID" }
 
         val verification = supabase.select(
@@ -159,7 +175,7 @@ class VideoRepository(
             )
         }
 
-        supabase.notifyChange("videos", "hashtags", "sounds")
+        supabase.notifyChange("videos", "hashtags", "sounds", "earn")
         videoId
     }.onFailure { if (it is CancellationException) throw it }
 
@@ -186,7 +202,7 @@ class VideoRepository(
     suspend fun deleteVideo(videoId: String): Result<Unit> = runCatching {
         requireUid()
         supabase.delete("vyora_videos_ledger", "video_id=eq.${SupabaseClient.urlEncode(videoId)}")
-        supabase.notifyChange("videos")
+        supabase.notifyChange("videos", "earn")
         Unit
     }.onFailure { if (it is CancellationException) throw it }
 

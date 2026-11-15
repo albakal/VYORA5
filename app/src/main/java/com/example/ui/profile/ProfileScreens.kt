@@ -29,6 +29,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
@@ -105,6 +106,7 @@ fun ProfileScreen(
     onOpenAdmin: () -> Unit,
     onOpenNotifications: () -> Unit,
     onOpenChat: (String, String) -> Unit,
+    onOpenEarnWithUs: () -> Unit = {},
     onBack: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
@@ -285,6 +287,18 @@ fun ProfileScreen(
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(vString(R.string.wallet_earnings))
                             }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = onOpenEarnWithUs,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEC4899)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("open_earn_with_us_button")
+                        ) {
+                            Icon(Icons.Filled.CardGiftcard, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(vString(R.string.earn_program_title))
                         }
                         if (isAdmin) {
                             Spacer(modifier = Modifier.height(8.dp))

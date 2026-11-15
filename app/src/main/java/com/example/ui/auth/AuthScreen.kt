@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -77,6 +78,7 @@ import androidx.compose.ui.unit.sp
 import androidx.credentials.CredentialManager
 import com.example.R
 import com.example.data.remote.SupabaseClient
+import com.example.earn.EarnLogic
 import com.example.ui.components.ApkExportControls
 import com.example.ui.theme.ElectricViolet
 import com.example.ui.theme.EmeraldLive
@@ -89,7 +91,9 @@ import kotlinx.coroutines.launch
 fun AuthScreen(
     currentLanguage: String,
     onToggleLanguage: () -> Unit,
-    onAuthSuccess: () -> Unit
+    onAuthSuccess: () -> Unit,
+    initialReferralCode: String = "",
+    onReferralCodeChanged: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -101,6 +105,7 @@ fun AuthScreen(
     var displayName by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var referralCode by remember(initialReferralCode) { mutableStateOf(initialReferralCode) }
     var passwordVisible by remember { mutableStateOf(false) }
 
     var isLoading by remember { mutableStateOf(false) }
@@ -222,6 +227,21 @@ fun AuthScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
+                    )
+
+                    OutlinedTextField(
+                        value = referralCode,
+                        onValueChange = { next ->
+                            val clean = EarnLogic.sanitizeReferralCode(next)
+                            referralCode = clean
+                            onReferralCodeChanged(clean)
+                        },
+                        label = { Text(vString(R.string.earn_auth_referral_label)) },
+                        leadingIcon = { Icon(Icons.Filled.CardGiftcard, contentDescription = null) },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("auth_referral_code_input")
                     )
 
                     Button(

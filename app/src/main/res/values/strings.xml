@@ -158,4 +158,45 @@
     <string name="approve">Approve</string>
     <string name="dismiss">Dismiss</string>
     <string name="remove_content">Remove Video</string>
+    <string name="admin_earn_tab">Earn With Us</string>
+
+    <!-- Earn With Us Program -->
+    <string name="earn_program_title">Earn With Us</string>
+    <string name="earn_program_subtitle">Invite 10 friends &amp; publish 10 videos to earn 1,500 EGP</string>
+    <string name="earn_open_cta">Open Rewards Program</string>
+    <string name="earn_reward_amount">Target Reward: %1$s EGP</string>
+    <string name="earn_reward_points">≈ %1$s Points</string>
+    <string name="earn_status_in_progress">In Progress</string>
+    <string name="earn_status_under_review">Under Review</string>
+    <string name="earn_status_eligible">Eligible for Payout</string>
+    <string name="earn_status_approved">Approved &amp; Credited</string>
+    <string name="earn_status_rejected">Rejected</string>
+    <string name="earn_paused_banner">The Earn With Us program is currently paused by administration.</string>
+    <string name="earn_personal_videos">Personal Videos</string>
+    <string name="earn_invited_friends">Invited Friends</string>
+    <string name="earn_completed_friends">Completed Friends</string>
+    <string name="earn_my_daily_usage">My Today Active Usage</string>
+    <string name="earn_referral_code_title">Your Unique Referral Code</string>
+    <string name="earn_copy_code">Copy Code</string>
+    <string name="earn_share_invite">Share Invite</string>
+    <string name="earn_code_copied">Referral code copied!</string>
+    <string name="earn_share_message">Join VYORA and use my referral code %1$s when signing up!</string>
+    <string name="earn_redeem_title">Have a Friend\'s Referral Code?</string>
+    <string name="earn_redeem_hint">Enter referral code (1 time only)</string>
+    <string name="earn_redeem_submit">Apply Code</string>
+    <string name="earn_redeemed_badge">Linked to code: %1$s</string>
+    <string name="earn_friends_progress_title">Invited Friends Progress (%1$d/%2$d)</string>
+    <string name="earn_no_friends_yet">No friends joined with your code yet. Share your code to start!</string>
+    <string name="earn_friend_days">Days: %1$d / %2$d</string>
+    <string name="earn_friend_minutes">Today Usage: %1$d / %2$d min</string>
+    <string name="earn_friend_videos">Today Videos: %1$d / %2$d</string>
+    <string name="earn_friend_completed">Completed</string>
+    <string name="earn_friend_under_review">Device Under Review</string>
+    <string name="earn_security_notice">One eligible account per phone. Shared family phones can be reviewed by admins.</string>
+    <string name="earn_auth_referral_label">Referral Code (Optional)</string>
+    <string name="earn_admin_enable_toggle">Enable Earn With Us Program</string>
+    <string name="earn_admin_suspicious_devices">Suspicious / Shared Devices</string>
+    <string name="earn_admin_approve_exception">Approve Family Exception</string>
+    <string name="earn_admin_block_device">Block Device</string>
+    <string name="earn_admin_payout_logs">Payout &amp; Review History</string>
 </resources>

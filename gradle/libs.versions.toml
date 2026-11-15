@@ -40,6 +40,8 @@ credentials = "1.5.0"
 googleid = "1.1.1"
 media3 = "1.11.1"
 agoraRtc = "4.7.0"
+playServicesAppset = "16.1.0"
+playIntegrity = "1.6.0"
 
 
 [libraries]
@@ -93,6 +95,8 @@ androidx-media3-exoplayer = { group = "androidx.media3", name = "media3-exoplaye
 androidx-media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "media3" }
 androidx-media3-common = { group = "androidx.media3", name = "media3-common", version.ref = "media3" }
 agora-rtc = { group = "io.agora.rtc", name = "full-sdk", version.ref = "agoraRtc" }
+play-services-appset = { group = "com.google.android.gms", name = "play-services-appset", version.ref = "playServicesAppset" }
+play-integrity = { group = "com.google.android.play", name = "integrity", version.ref = "playIntegrity" }
 
 
 [plugins]

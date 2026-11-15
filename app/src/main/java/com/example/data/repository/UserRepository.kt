@@ -158,15 +158,34 @@ class UserRepository(
     suspend fun updateAvatar(avatarUrl: String): Result<Unit> = runCatching {
         val uid = requireUid()
         val cleanUrl = avatarUrl.trim()
+        require(cleanUrl.isNotBlank()) { "رابط الصورة الشخصية غير صالح" }
         val rpcSucceeded = runCatching {
             supabase.rpc("vyora_update_avatar", JSONObject().put("p_avatar_url", cleanUrl))
         }.isSuccess
         if (!rpcSucceeded) {
-            supabase.update(
-                "vyora_profiles",
-                "user_id=eq.${SupabaseClient.urlEncode(uid)}",
-                JSONObject().put("avatar_url", cleanUrl)
-            )
+            val email = supabase.currentUser?.email.orEmpty()
+            val username = email.substringBefore("@").ifBlank { "creator_${uid.take(6)}" }
+            val updated = runCatching {
+                supabase.update(
+                    "vyora_profiles",
+                    "user_id=eq.${SupabaseClient.urlEncode(uid)}",
+                    JSONObject().put("avatar_url", cleanUrl)
+                )
+            }
+            if (updated.isFailure) {
+                supabase.insert(
+                    "vyora_profiles",
+                    JSONObject().apply {
+                        put("user_id", uid)
+                        put("email", email)
+                        put("username", username)
+                        put("display_name", supabase.currentUser?.displayName?.ifBlank { username } ?: username)
+                        put("avatar_url", cleanUrl)
+                    },
+                    upsert = true,
+                    onConflict = "user_id"
+                )
+            }
         }
         supabase.notifyChange("profiles", "videos", "comments", "live")
         Unit

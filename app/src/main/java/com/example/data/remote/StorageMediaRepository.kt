@@ -3,19 +3,28 @@ package com.example.data.remote
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import com.example.earn.EarnLogic
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.UUID
 
 sealed interface UploadStatus {
     data class Progress(val percent: Int) : UploadStatus
-    data class Completed(val downloadUrl: String, val thumbnailUrl: String = "") : UploadStatus
+    data class Completed(
+        val downloadUrl: String,
+        val thumbnailUrl: String = "",
+        val contentHash: String = "",
+        val fileSizeBytes: Long = 0L
+    ) : UploadStatus
     data class Failed(val message: String) : UploadStatus
 }
 
@@ -37,21 +46,24 @@ class StorageMediaRepository(
                 context.contentResolver.openAssetFileDescriptor(videoUri, "r")?.use { it.length } ?: -1L
             }.getOrDefault(-1L)
         }
-        val canRead = withContext(Dispatchers.IO) {
+        val (contentHash, measuredSize) = withContext(Dispatchers.IO) {
             runCatching {
-                context.contentResolver.openInputStream(videoUri)?.use { it.available() >= 0 } ?: false
-            }.getOrDefault(false)
+                context.contentResolver.openInputStream(videoUri)?.use { stream ->
+                    EarnLogic.computeStreamSha256AndSize(stream)
+                }
+            }.getOrNull() ?: ("" to -1L)
         }
-        if (!canRead) {
+        if (measuredSize <= 0L) {
             emit(UploadStatus.Failed("Unable to read selected video file"))
             return@flow
         }
 
+        val effectiveLength = if (contentLength > 0L) contentLength else measuredSize
         emit(UploadStatus.Progress(35))
         val videoUrl = try {
             supabase.uploadStorageStream(
                 objectPath = "videos/$userId/$fileId.mp4",
-                contentLength = contentLength,
+                contentLength = effectiveLength,
                 contentType = context.contentResolver.getType(videoUri) ?: "video/mp4",
                 openStream = { context.contentResolver.openInputStream(videoUri) }
             )
@@ -68,7 +80,7 @@ class StorageMediaRepository(
         emit(UploadStatus.Progress(80))
         val thumbBytes = withContext(Dispatchers.IO) {
             if (customCoverUri != null) {
-                readUriBytes(context, customCoverUri)
+                readUriBytes(context, customCoverUri)?.let { encodeCompressedImageBytes(it, maxEdgePx = 720) ?: it }
             } else {
                 extractVideoFrameBytes(context, videoUri)
             }
@@ -87,58 +99,31 @@ class StorageMediaRepository(
         }
 
         emit(UploadStatus.Progress(100))
-        emit(UploadStatus.Completed(downloadUrl = videoUrl, thumbnailUrl = thumbUrl))
+        emit(
+            UploadStatus.Completed(
+                downloadUrl = videoUrl,
+                thumbnailUrl = thumbUrl,
+                contentHash = contentHash,
+                fileSizeBytes = effectiveLength.coerceAtLeast(0L)
+            )
+        )
     }
 
     suspend fun uploadImage(userId: String, folder: String, uri: Uri): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
-            val bytes = encodeCompressedImageBytes(appContext, uri)
-                ?: readUriBytes(appContext, uri)
-                ?: throw IllegalStateException("Unable to read image file")
+            val rawBytes = readUriBytes(appContext, uri)
+                ?.takeIf { it.isNotEmpty() }
+                ?: throw IllegalStateException("تعذر قراءة ملف الصورة المختار")
+            val compressedBytes = encodeCompressedImageBytes(rawBytes)
+            val payload = compressedBytes?.takeIf { it.isNotEmpty() } ?: rawBytes
+            val isJpeg = compressedBytes != null && compressedBytes.isNotEmpty()
+            val ext = if (isJpeg) "jpg" else guessExtensionFromUri(appContext, uri)
+            val mime = if (isJpeg) "image/jpeg" else (appContext.contentResolver.getType(uri) ?: "image/jpeg")
             supabase.uploadStorageObject(
-                objectPath = "$folder/$userId/${UUID.randomUUID()}.jpg",
-                bytes = bytes,
-                contentType = "image/jpeg"
+                objectPath = "$folder/$userId/${UUID.randomUUID()}.$ext",
+                bytes = payload,
+                contentType = mime
             )
-        }
-    }
-
-    private fun encodeCompressedImageBytes(context: Context, uri: Uri, maxEdgePx: Int = 720): ByteArray? {
-        return try {
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            context.contentResolver.openInputStream(uri)?.use {
-                BitmapFactory.decodeStream(it, null, bounds)
-            }
-            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-
-            var sampleSize = 1
-            while ((bounds.outWidth / sampleSize) > maxEdgePx * 2 || (bounds.outHeight / sampleSize) > maxEdgePx * 2) {
-                sampleSize *= 2
-            }
-            val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
-            val decoded = context.contentResolver.openInputStream(uri)?.use {
-                BitmapFactory.decodeStream(it, null, decodeOpts)
-            } ?: return null
-
-            val maxDim = maxOf(decoded.width, decoded.height)
-            val scaled = if (maxDim > maxEdgePx) {
-                val ratio = maxEdgePx.toFloat() / maxDim.toFloat()
-                Bitmap.createScaledBitmap(
-                    decoded,
-                    (decoded.width * ratio).toInt().coerceAtLeast(1),
-                    (decoded.height * ratio).toInt().coerceAtLeast(1),
-                    true
-                )
-            } else {
-                decoded
-            }
-            val baos = ByteArrayOutputStream()
-            scaled.compress(Bitmap.CompressFormat.JPEG, 86, baos)
-            if (scaled !== decoded) scaled.recycle()
-            decoded.recycle()
-            baos.toByteArray()
-        } catch (_: Exception) {
-            null
         }
     }
 
@@ -150,6 +135,7 @@ class StorageMediaRepository(
     ): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
             val bytes = readUriBytes(appContext, uri)
+                ?.takeIf { it.isNotEmpty() }
                 ?: throw IllegalStateException("Unable to read media file")
             val mimeType = when (extension.lowercase()) {
                 "mp4" -> "video/mp4"
@@ -171,6 +157,15 @@ class StorageMediaRepository(
         null
     }
 
+    private fun guessExtensionFromUri(context: Context, uri: Uri): String {
+        val mime = context.contentResolver.getType(uri).orEmpty().lowercase()
+        return when {
+            mime.contains("png") -> "png"
+            mime.contains("webp") -> "webp"
+            else -> "jpg"
+        }
+    }
+
     private fun extractVideoFrameBytes(context: Context, videoUri: Uri): ByteArray? {
         return try {
             val retriever = MediaMetadataRetriever()
@@ -182,12 +177,84 @@ class StorageMediaRepository(
                 val scaled = Bitmap.createScaledBitmap(bitmap, 480, targetHeight, true)
                 val baos = ByteArrayOutputStream()
                 scaled.compress(Bitmap.CompressFormat.JPEG, 78, baos)
+                if (scaled !== bitmap) scaled.recycle()
+                bitmap.recycle()
                 baos.toByteArray()
             } else {
                 null
             }
         } catch (_: Exception) {
             null
+        }
+    }
+
+    companion object {
+        fun encodeCompressedImageBytes(rawBytes: ByteArray, maxEdgePx: Int = 720): ByteArray? {
+            if (rawBytes.isEmpty()) return null
+            return try {
+                val exifOrientation = runCatching {
+                    ExifInterface(ByteArrayInputStream(rawBytes)).getAttributeInt(
+                        ExifInterface.TAG_ORIENTATION,
+                        ExifInterface.ORIENTATION_NORMAL
+                    )
+                }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, bounds)
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+                var sampleSize = 1
+                while ((bounds.outWidth / sampleSize) > maxEdgePx * 2 || (bounds.outHeight / sampleSize) > maxEdgePx * 2) {
+                    sampleSize *= 2
+                }
+                val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+                val decoded = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, decodeOpts)
+                    ?: return null
+
+                val oriented = applyExifOrientation(decoded, exifOrientation)
+                if (oriented !== decoded) decoded.recycle()
+
+                val maxDim = maxOf(oriented.width, oriented.height)
+                val scaled = if (maxDim > maxEdgePx) {
+                    val ratio = maxEdgePx.toFloat() / maxDim.toFloat()
+                    Bitmap.createScaledBitmap(
+                        oriented,
+                        (oriented.width * ratio).toInt().coerceAtLeast(1),
+                        (oriented.height * ratio).toInt().coerceAtLeast(1),
+                        true
+                    )
+                } else {
+                    oriented
+                }
+                val baos = ByteArrayOutputStream()
+                scaled.compress(Bitmap.CompressFormat.JPEG, 86, baos)
+                if (scaled !== oriented) scaled.recycle()
+                oriented.recycle()
+                baos.toByteArray().takeIf { it.isNotEmpty() }
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        private fun applyExifOrientation(bitmap: Bitmap, orientation: Int): Bitmap {
+            val matrix = Matrix()
+            when (orientation) {
+                ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+                ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+                ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+                ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+                ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+                ExifInterface.ORIENTATION_TRANSPOSE -> {
+                    matrix.postRotate(90f)
+                    matrix.postScale(-1f, 1f)
+                }
+                ExifInterface.ORIENTATION_TRANSVERSE -> {
+                    matrix.postRotate(270f)
+                    matrix.postScale(-1f, 1f)
+                }
+                else -> return bitmap
+            }
+            return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
         }
     }
 }

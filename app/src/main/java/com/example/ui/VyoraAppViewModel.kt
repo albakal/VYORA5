@@ -10,6 +10,9 @@ import com.example.data.model.AdminSettings
 import com.example.data.model.AppNotification
 import com.example.data.model.ChatMessage
 import com.example.data.model.Conversation
+import com.example.data.model.EarnAdminOverview
+import com.example.data.model.EarnDashboardState
+import com.example.data.model.EarnProgramConfig
 import com.example.data.model.FollowRequest
 import com.example.data.model.HashtagItem
 import com.example.data.model.LiveComment
@@ -22,7 +25,9 @@ import com.example.data.model.VideoPost
 import com.example.data.model.Wallet
 import com.example.data.model.WalletTransaction
 import com.example.data.model.WithdrawalRequest
+import com.example.data.preferences.AppPreferencesRepository
 import com.example.data.remote.AgoraLiveSession
+import com.example.data.remote.EarnProgramRepository
 import com.example.data.remote.StorageMediaRepository
 import com.example.data.remote.SupabaseBackendRepository
 import com.example.data.remote.SupabaseClient
@@ -36,18 +41,23 @@ import com.example.data.repository.NotificationRepository
 import com.example.data.repository.UserRepository
 import com.example.data.repository.VideoRepository
 import com.example.data.repository.WalletAdminRepository
+import com.example.security.DeviceIntegrityHelper
+import com.example.security.DeviceIntegrityInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 sealed interface UiState<out T> {
@@ -80,7 +90,10 @@ class VyoraAppViewModel(
     private val walletAdminRepo: WalletAdminRepository,
     private val storageRepo: StorageMediaRepository,
     private val backendRepo: SupabaseBackendRepository,
-    private val supabaseLedgerClient: SupabaseLedgerClient = SupabaseLedgerClient()
+    private val supabaseLedgerClient: SupabaseLedgerClient = SupabaseLedgerClient(),
+    private val earnRepo: EarnProgramRepository = EarnProgramRepository(supabaseClient),
+    private val deviceIntegrityHelper: DeviceIntegrityHelper? = null,
+    private val prefsRepo: AppPreferencesRepository? = null
 ) : ViewModel() {
 
     private val _isAdmin = MutableStateFlow(false)
@@ -97,6 +110,18 @@ class VyoraAppViewModel(
 
     private val _isUpdatingAvatar = MutableStateFlow(false)
     val isUpdatingAvatar: StateFlow<Boolean> = _isUpdatingAvatar.asStateFlow()
+
+    private val _earnDashboard = MutableStateFlow<EarnDashboardState?>(null)
+    val earnDashboard: StateFlow<EarnDashboardState?> = _earnDashboard.asStateFlow()
+
+    private val _earnAdminOverview = MutableStateFlow<EarnAdminOverview?>(null)
+    val earnAdminOverview: StateFlow<EarnAdminOverview?> = _earnAdminOverview.asStateFlow()
+
+    private val _isEarnBusy = MutableStateFlow(false)
+    val isEarnBusy: StateFlow<Boolean> = _isEarnBusy.asStateFlow()
+
+    private var cachedDeviceIntegrity: DeviceIntegrityInfo? = null
+    private var heartbeatJob: Job? = null
 
     private val _feedRefreshTrigger = MutableStateFlow(0)
 
@@ -209,9 +234,162 @@ class VyoraAppViewModel(
                     displayName = user.displayName,
                     avatarUrl = user.avatarUrl
                 )
-                _isAdmin.value = walletAdminRepo.checkIsAdmin(user.uid, user.email)
+                val adminStatus = walletAdminRepo.checkIsAdmin(user.uid, user.email)
+                _isAdmin.value = adminStatus
                 refreshAccountingSync()
+
+                val device = resolveDeviceIntegrity()
+                earnRepo.registerDeviceAndCode(device)
+
+                val pendingCode = runCatching {
+                    prefsRepo?.preferencesFlow?.first()?.pendingReferralCode.orEmpty()
+                }.getOrDefault("")
+                if (pendingCode.isNotBlank()) {
+                    earnRepo.redeemReferralCode(pendingCode, device)
+                        .onSuccess { underReview ->
+                            prefsRepo?.clearPendingReferralCode()
+                            _toastMessage.value = if (underReview) {
+                                "تم تسجيل كود الإحالة والجهاز قيد المراجعة الإدارية"
+                            } else {
+                                "تم تفعيل كود الإحالة بنجاح!"
+                            }
+                        }
+                        .onFailure { err ->
+                            prefsRepo?.clearPendingReferralCode()
+                            _toastMessage.value = err.localizedMessage
+                        }
+                }
+
+                refreshEarnDashboard()
+                if (adminStatus) {
+                    refreshAdminEarnOverview()
+                }
             }
+        }
+    }
+
+    private suspend fun resolveDeviceIntegrity(): DeviceIntegrityInfo {
+        cachedDeviceIntegrity?.let { return it }
+        val collected = deviceIntegrityHelper?.collectDeviceIntegrity(currentUserId)
+            ?: DeviceIntegrityInfo(
+                deviceFingerprint = DeviceIntegrityHelper.sha256Hex("fallback:$currentUserId"),
+                appSetId = "",
+                hardwareId = "",
+                playIntegrityStatus = "unavailable",
+                playIntegrityTokenHash = ""
+            )
+        cachedDeviceIntegrity = collected
+        return collected
+    }
+
+    fun onAppForegroundChanged(inForeground: Boolean) {
+        if (!inForeground) {
+            heartbeatJob?.cancel()
+            heartbeatJob = null
+            return
+        }
+        if (heartbeatJob?.isActive == true) return
+        heartbeatJob = viewModelScope.launch {
+            while (isActive) {
+                delay(30_000L)
+                val device = resolveDeviceIntegrity()
+                earnRepo.sendHeartbeat(30L, device)
+                earnRepo.fetchDashboard(device).onSuccess {
+                    _earnDashboard.value = it
+                }
+            }
+        }
+    }
+
+    fun refreshEarnDashboard() {
+        viewModelScope.launch {
+            _isEarnBusy.value = true
+            val device = resolveDeviceIntegrity()
+            earnRepo.fetchDashboard(device)
+                .onSuccess { _earnDashboard.value = it }
+                .onFailure { e ->
+                    Log.w(TAG, "Earn dashboard load error", e)
+                }
+            _isEarnBusy.value = false
+        }
+    }
+
+    fun redeemReferralCode(rawCode: String) {
+        viewModelScope.launch {
+            _isEarnBusy.value = true
+            val device = resolveDeviceIntegrity()
+            earnRepo.redeemReferralCode(rawCode, device)
+                .onSuccess { underReview ->
+                    prefsRepo?.clearPendingReferralCode()
+                    _toastMessage.value = if (underReview) {
+                        "تم ربط الكود، لكن الحساب/الجهاز قيد المراجعة لمنع تعدد الحسابات"
+                    } else {
+                        "تم تفعيل كود الإحالة بنجاح!"
+                    }
+                    earnRepo.fetchDashboard(device).onSuccess { _earnDashboard.value = it }
+                }
+                .onFailure { err ->
+                    _toastMessage.value = err.localizedMessage ?: "تعذر تفعيل كود الإحالة"
+                }
+            _isEarnBusy.value = false
+        }
+    }
+
+    fun refreshAdminEarnOverview() {
+        if (!_isAdmin.value) return
+        viewModelScope.launch {
+            _isEarnBusy.value = true
+            earnRepo.fetchAdminOverview()
+                .onSuccess { _earnAdminOverview.value = it }
+                .onFailure { e -> _toastMessage.value = e.localizedMessage }
+            _isEarnBusy.value = false
+        }
+    }
+
+    fun adminUpdateEarnConfig(config: EarnProgramConfig) {
+        viewModelScope.launch {
+            _isEarnBusy.value = true
+            earnRepo.adminUpdateConfig(config)
+                .onSuccess {
+                    _toastMessage.value = "تم تحديث إعدادات برنامج اربح معنا"
+                    earnRepo.fetchAdminOverview().onSuccess { _earnAdminOverview.value = it }
+                    refreshEarnDashboard()
+                }
+                .onFailure { _toastMessage.value = it.localizedMessage }
+            _isEarnBusy.value = false
+        }
+    }
+
+    fun adminReviewEarnDevice(deviceFingerprint: String, decision: String, note: String) {
+        viewModelScope.launch {
+            _isEarnBusy.value = true
+            earnRepo.adminReviewDevice(deviceFingerprint, decision, note)
+                .onSuccess {
+                    _toastMessage.value = "تم تحديث حالة الجهاز بنجاح"
+                    earnRepo.fetchAdminOverview().onSuccess { _earnAdminOverview.value = it }
+                    refreshEarnDashboard()
+                }
+                .onFailure { _toastMessage.value = it.localizedMessage }
+            _isEarnBusy.value = false
+        }
+    }
+
+    fun adminReviewEarnPayout(targetUid: String, approve: Boolean, note: String) {
+        viewModelScope.launch {
+            _isEarnBusy.value = true
+            earnRepo.adminReviewPayout(targetUid, approve, note)
+                .onSuccess {
+                    _toastMessage.value = if (approve) {
+                        "تم اعتماد المكافأة وإضافة النقاط إلى محفظة المستخدم"
+                    } else {
+                        "تم رفض طلب المكافأة وتسجيل السبب"
+                    }
+                    earnRepo.fetchAdminOverview().onSuccess { _earnAdminOverview.value = it }
+                    refreshAccountingSync()
+                    refreshEarnDashboard()
+                }
+                .onFailure { _toastMessage.value = it.localizedMessage }
+            _isEarnBusy.value = false
         }
     }
 
@@ -384,10 +562,13 @@ class VyoraAppViewModel(
                             caption = caption,
                             soundId = soundId,
                             soundTitle = soundTitle,
-                            durationSec = durationSec
+                            durationSec = durationSec,
+                            contentHash = status.contentHash,
+                            fileSizeBytes = status.fileSizeBytes
                         ).onSuccess {
                             _toastMessage.value = "Video published!"
                             retryFeed()
+                            refreshEarnDashboard()
                             onPublished()
                         }.onFailure { e ->
                             val msg = e.localizedMessage ?: "Failed to save video"
@@ -413,6 +594,7 @@ class VyoraAppViewModel(
         viewModelScope.launch {
             videoRepo.deleteVideo(videoId).onSuccess {
                 _toastMessage.value = "Deleted"
+                refreshEarnDashboard()
             }.onFailure {
                 _toastMessage.value = it.localizedMessage
             }
