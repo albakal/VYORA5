@@ -29,15 +29,34 @@ CREATE TABLE IF NOT EXISTS public.vyora_profiles (
 );
 
 -- Safe migrations if vyora_profiles already existed from an earlier version
+ALTER TABLE public.vyora_profiles ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE public.vyora_profiles ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.vyora_profiles ADD COLUMN IF NOT EXISTS username TEXT NOT NULL DEFAULT '';
 ALTER TABLE public.vyora_profiles ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE public.vyora_profiles ADD COLUMN IF NOT EXISTS bio TEXT NOT NULL DEFAULT '';
 ALTER TABLE public.vyora_profiles ADD COLUMN IF NOT EXISTS avatar_url TEXT NOT NULL DEFAULT '';
 ALTER TABLE public.vyora_profiles ADD COLUMN IF NOT EXISTS is_private BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE public.vyora_profiles ADD COLUMN IF NOT EXISTS is_banned BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE public.vyora_profiles ADD COLUMN IF NOT EXISTS followers_count BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.vyora_profiles ADD COLUMN IF NOT EXISTS following_count BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.vyora_profiles ADD COLUMN IF NOT EXISTS likes_count BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.vyora_profiles ADD COLUMN IF NOT EXISTS interests TEXT[] NOT NULL DEFAULT ARRAY['comedy', 'music', 'tech'];
 ALTER TABLE public.vyora_profiles ADD COLUMN IF NOT EXISTS language TEXT NOT NULL DEFAULT 'ar';
 ALTER TABLE public.vyora_profiles ADD COLUMN IF NOT EXISTS theme_mode TEXT NOT NULL DEFAULT 'dark';
+ALTER TABLE public.vyora_profiles ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE public.vyora_profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'vyora_profiles' AND column_name = 'id'
+    ) THEN
+        EXECUTE 'UPDATE public.vyora_profiles SET user_id = COALESCE(NULLIF(user_id, ''''), id::text) WHERE COALESCE(user_id, '''') = ''''';
+    END IF;
+END;
+$$;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vyora_profiles_user_id_uidx ON public.vyora_profiles(user_id);
 
 CREATE TABLE IF NOT EXISTS public.vyora_follows (
     id TEXT PRIMARY KEY,
@@ -99,16 +118,69 @@ CREATE TABLE IF NOT EXISTS public.vyora_videos_ledger (
 );
 
 -- Safe migrations if vyora_videos_ledger already existed from an earlier version
+ALTER TABLE public.vyora_videos_ledger ADD COLUMN IF NOT EXISTS video_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.vyora_videos_ledger ADD COLUMN IF NOT EXISTS creator_uid TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.vyora_videos_ledger ADD COLUMN IF NOT EXISTS creator_username TEXT NOT NULL DEFAULT '';
 ALTER TABLE public.vyora_videos_ledger ADD COLUMN IF NOT EXISTS creator_avatar_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.vyora_videos_ledger ADD COLUMN IF NOT EXISTS video_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.vyora_videos_ledger ADD COLUMN IF NOT EXISTS thumbnail_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.vyora_videos_ledger ADD COLUMN IF NOT EXISTS caption TEXT NOT NULL DEFAULT '';
 ALTER TABLE public.vyora_videos_ledger ADD COLUMN IF NOT EXISTS hashtags TEXT[] NOT NULL DEFAULT '{}';
 ALTER TABLE public.vyora_videos_ledger ADD COLUMN IF NOT EXISTS sound_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.vyora_videos_ledger ADD COLUMN IF NOT EXISTS sound_title TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.vyora_videos_ledger ADD COLUMN IF NOT EXISTS duration_sec BIGINT NOT NULL DEFAULT 15;
+ALTER TABLE public.vyora_videos_ledger ADD COLUMN IF NOT EXISTS views_count BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.vyora_videos_ledger ADD COLUMN IF NOT EXISTS likes_count BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.vyora_videos_ledger ADD COLUMN IF NOT EXISTS comments_count BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.vyora_videos_ledger ADD COLUMN IF NOT EXISTS shares_count BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.vyora_videos_ledger ADD COLUMN IF NOT EXISTS bookmarks_count BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.vyora_videos_ledger ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
 ALTER TABLE public.vyora_videos_ledger ADD COLUMN IF NOT EXISTS content_hash TEXT NOT NULL DEFAULT '';
 ALTER TABLE public.vyora_videos_ledger ADD COLUMN IF NOT EXISTS file_size_bytes BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.vyora_videos_ledger ADD COLUMN IF NOT EXISTS is_valid_for_earn BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE public.vyora_videos_ledger ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE public.vyora_videos_ledger ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'vyora_videos_ledger' AND column_name = 'user_id'
+    ) THEN
+        EXECUTE 'UPDATE public.vyora_videos_ledger SET creator_uid = COALESCE(NULLIF(creator_uid, ''''), user_id::text) WHERE COALESCE(creator_uid, '''') = ''''';
+        EXECUTE 'ALTER TABLE public.vyora_videos_ledger ALTER COLUMN user_id DROP NOT NULL';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'vyora_videos_ledger' AND column_name = 'creator_id'
+    ) THEN
+        EXECUTE 'UPDATE public.vyora_videos_ledger SET creator_uid = COALESCE(NULLIF(creator_uid, ''''), creator_id::text) WHERE COALESCE(creator_uid, '''') = ''''';
+        EXECUTE 'ALTER TABLE public.vyora_videos_ledger ALTER COLUMN creator_id DROP NOT NULL';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'vyora_videos_ledger' AND column_name = 'id'
+    ) THEN
+        EXECUTE 'UPDATE public.vyora_videos_ledger SET video_id = COALESCE(NULLIF(video_id, ''''), id::text) WHERE COALESCE(video_id, '''') = ''''';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'vyora_videos_ledger' AND column_name = 'username'
+    ) THEN
+        EXECUTE 'UPDATE public.vyora_videos_ledger SET creator_username = COALESCE(NULLIF(creator_username, ''''), username::text) WHERE COALESCE(creator_username, '''') = ''''';
+        EXECUTE 'ALTER TABLE public.vyora_videos_ledger ALTER COLUMN username DROP NOT NULL';
+    END IF;
+
+    UPDATE public.vyora_videos_ledger
+    SET video_id = REPLACE(gen_random_uuid()::text, '-', '')
+    WHERE COALESCE(video_id, '') = '';
+END;
+$$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vyora_videos_video_id_uidx ON public.vyora_videos_ledger(video_id);
 CREATE INDEX IF NOT EXISTS idx_vyora_videos_creator ON public.vyora_videos_ledger(creator_uid);
 CREATE INDEX IF NOT EXISTS idx_vyora_videos_status_created ON public.vyora_videos_ledger(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_vyora_videos_content_hash ON public.vyora_videos_ledger(content_hash) WHERE content_hash <> '';
@@ -277,6 +349,12 @@ CREATE TABLE IF NOT EXISTS public.vyora_wallets (
     total_earned_usd NUMERIC(12, 4) NOT NULL DEFAULT 0 CHECK (total_earned_usd >= 0),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE public.vyora_wallets ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.vyora_wallets ADD COLUMN IF NOT EXISTS points BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.vyora_wallets ADD COLUMN IF NOT EXISTS balance_usd NUMERIC(12, 4) NOT NULL DEFAULT 0;
+ALTER TABLE public.vyora_wallets ADD COLUMN IF NOT EXISTS total_earned_usd NUMERIC(12, 4) NOT NULL DEFAULT 0;
+ALTER TABLE public.vyora_wallets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vyora_wallets_user_id_uidx ON public.vyora_wallets(user_id);
 
 CREATE TABLE IF NOT EXISTS public.vyora_wallet_transactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -289,6 +367,8 @@ CREATE TABLE IF NOT EXISTS public.vyora_wallet_transactions (
     status TEXT NOT NULL DEFAULT 'completed' CHECK (status IN ('completed', 'pending', 'rejected')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE public.vyora_wallet_transactions ADD COLUMN IF NOT EXISTS external_ref TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vyora_wallet_tx_external_ref ON public.vyora_wallet_transactions(external_ref);
 ALTER TABLE public.vyora_wallet_transactions DROP CONSTRAINT IF EXISTS vyora_wallet_transactions_tx_type_check;
 ALTER TABLE public.vyora_wallet_transactions ADD CONSTRAINT vyora_wallet_transactions_tx_type_check
     CHECK (tx_type IN ('view_reward', 'watch_wheel', 'creator_bonus', 'withdrawal', 'adjustment'));
