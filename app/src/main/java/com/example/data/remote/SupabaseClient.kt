@@ -1,6 +1,7 @@
 package com.example.data.remote
 
 import android.content.Context
+import android.net.Uri
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -31,7 +32,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.io.InputStream
+import java.net.URLDecoder
 import java.net.URLEncoder
+import java.security.MessageDigest
+import java.security.SecureRandom
+import java.util.Base64
 import java.util.concurrent.TimeUnit
 
 private val Context.supabaseSessionStore by preferencesDataStore(name = "vyora_supabase_session")
@@ -71,6 +76,7 @@ class SupabaseClient private constructor(
     private val keyEmail = stringPreferencesKey("email")
     private val keyDisplayName = stringPreferencesKey("display_name")
     private val keyAvatarUrl = stringPreferencesKey("avatar_url")
+    private val keyPendingOAuthVerifier = stringPreferencesKey("pending_oauth_code_verifier")
 
     private val sessionMutex = Mutex()
     private var cachedSession: SupabaseSession? = null
@@ -259,6 +265,124 @@ class SupabaseClient private constructor(
                 session.user
             }
         }.onFailure { if (it is CancellationException) throw it }
+    }
+
+    suspend fun prepareGoogleOAuthUrl(): String = withContext(Dispatchers.IO) {
+        requireConfigured()
+        val verifier = generatePkceCodeVerifier()
+        val challenge = computePkceCodeChallenge(verifier)
+        appContext.supabaseSessionStore.edit { prefs ->
+            prefs[keyPendingOAuthVerifier] = verifier
+        }
+        buildGoogleOAuthAuthorizeUrl(
+            baseUrl = baseUrl,
+            codeChallenge = challenge,
+            redirectTo = OAUTH_REDIRECT_URL
+        )
+    }
+
+    suspend fun handleOAuthCallbackUri(uri: Uri?): Result<SupabaseUser?> = withContext(Dispatchers.IO) {
+        if (!isOAuthCallbackUri(uri)) {
+            return@withContext Result.success(null)
+        }
+        runCatching {
+            requireConfigured()
+            val callbackUri = uri!!
+            val params = parseOAuthCallbackParams(
+                encodedQuery = callbackUri.encodedQuery,
+                encodedFragment = callbackUri.encodedFragment
+            )
+            val errDesc = params["error_description"]?.takeIf { it.isNotBlank() }
+                ?: params["error"]?.takeIf { it.isNotBlank() }
+            if (errDesc != null) {
+                clearPendingOAuthVerifier()
+                throw SupabaseException(400, errDesc)
+            }
+
+            val authCode = params["code"].orEmpty()
+            if (authCode.isNotBlank()) {
+                val verifier = consumePendingOAuthVerifier()
+                if (verifier.isBlank()) {
+                    throw SupabaseException(
+                        400,
+                        "OAuth verification state expired. Please tap Gmail sign-in again."
+                    )
+                }
+                val bodyJson = JSONObject().apply {
+                    put("auth_code", authCode)
+                    put("code_verifier", verifier)
+                }
+                val req = Request.Builder()
+                    .url("$baseUrl/auth/v1/token?grant_type=pkce")
+                    .addHeader("apikey", publishableKey)
+                    .addHeader("Content-Type", "application/json")
+                    .post(bodyJson.toString().toRequestBody(JSON_MEDIA))
+                    .build()
+
+                httpClient.newCall(req).execute().use { resp ->
+                    val raw = resp.body?.string().orEmpty()
+                    if (!resp.isSuccessful) {
+                        throw SupabaseException(resp.code, parseSupabaseError(raw, resp.code))
+                    }
+                    val session = parseSessionFromAuthJson(JSONObject(raw))
+                    saveSession(session)
+                    return@runCatching session.user
+                }
+            }
+
+            val accessToken = params["access_token"].orEmpty()
+            if (accessToken.isNotBlank()) {
+                clearPendingOAuthVerifier()
+                val refreshToken = params["refresh_token"].orEmpty()
+                val expiresIn = params["expires_in"]?.toLongOrNull() ?: 3600L
+                val expiresAt = (System.currentTimeMillis() / 1000L) + expiresIn
+                val userReq = Request.Builder()
+                    .url("$baseUrl/auth/v1/user")
+                    .addHeader("apikey", publishableKey)
+                    .addHeader("Authorization", "Bearer $accessToken")
+                    .get()
+                    .build()
+
+                httpClient.newCall(userReq).execute().use { resp ->
+                    val raw = resp.body?.string().orEmpty()
+                    if (!resp.isSuccessful) {
+                        throw SupabaseException(resp.code, parseSupabaseError(raw, resp.code))
+                    }
+                    val userJson = JSONObject(raw)
+                    val wrapped = JSONObject().apply {
+                        put("access_token", accessToken)
+                        put("refresh_token", refreshToken)
+                        put("expires_in", expiresIn)
+                        put("expires_at", expiresAt)
+                        put("user", userJson)
+                    }
+                    val session = parseSessionFromAuthJson(wrapped)
+                    saveSession(session)
+                    return@runCatching session.user
+                }
+            }
+
+            clearPendingOAuthVerifier()
+            throw SupabaseException(
+                400,
+                "Google OAuth callback did not return a session or authorization code."
+            )
+        }.onFailure { if (it is CancellationException) throw it }
+    }
+
+    private suspend fun consumePendingOAuthVerifier(): String {
+        val prefs = appContext.supabaseSessionStore.data.first()
+        val verifier = prefs[keyPendingOAuthVerifier].orEmpty()
+        if (verifier.isNotBlank()) {
+            clearPendingOAuthVerifier()
+        }
+        return verifier
+    }
+
+    private suspend fun clearPendingOAuthVerifier() {
+        appContext.supabaseSessionStore.edit { prefs ->
+            prefs.remove(keyPendingOAuthVerifier)
+        }
     }
 
     suspend fun signOut() = withContext(Dispatchers.IO) {
@@ -650,6 +774,9 @@ class SupabaseClient private constructor(
 
     companion object {
         const val DEFAULT_STORAGE_BUCKET = "vyora-media"
+        const val OAUTH_REDIRECT_SCHEME = "vyora"
+        const val OAUTH_REDIRECT_HOST = "auth-callback"
+        const val OAUTH_REDIRECT_URL = "$OAUTH_REDIRECT_SCHEME://$OAUTH_REDIRECT_HOST"
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
 
         @Volatile
@@ -662,6 +789,61 @@ class SupabaseClient private constructor(
         }
 
         fun currentInstanceOrNull(): SupabaseClient? = instance
+
+        fun isOAuthCallbackUri(uri: Uri?): Boolean =
+            uri != null &&
+                uri.scheme.equals(OAUTH_REDIRECT_SCHEME, ignoreCase = true) &&
+                uri.host.equals(OAUTH_REDIRECT_HOST, ignoreCase = true)
+
+        fun generatePkceCodeVerifier(): String {
+            val bytes = ByteArray(48)
+            SecureRandom().nextBytes(bytes)
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+        }
+
+        fun computePkceCodeChallenge(codeVerifier: String): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+                .digest(codeVerifier.toByteArray(Charsets.US_ASCII))
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(digest)
+        }
+
+        fun buildGoogleOAuthAuthorizeUrl(
+            baseUrl: String,
+            codeChallenge: String,
+            redirectTo: String = OAUTH_REDIRECT_URL
+        ): String {
+            val cleanBase = baseUrl.trim().trimEnd('/')
+            return "$cleanBase/auth/v1/authorize" +
+                "?provider=google" +
+                "&redirect_to=${urlEncode(redirectTo)}" +
+                "&code_challenge=${urlEncode(codeChallenge)}" +
+                "&code_challenge_method=s256" +
+                "&prompt=select_account"
+        }
+
+        fun parseOAuthCallbackParams(
+            encodedQuery: String?,
+            encodedFragment: String?
+        ): Map<String, String> {
+            val result = linkedMapOf<String, String>()
+            fun parsePart(raw: String?) {
+                if (raw.isNullOrBlank()) return
+                raw.split("&").forEach { pair ->
+                    if (pair.isBlank()) return@forEach
+                    val idx = pair.indexOf('=')
+                    val key = if (idx >= 0) pair.substring(0, idx) else pair
+                    val value = if (idx >= 0) pair.substring(idx + 1) else ""
+                    val decodedKey = URLDecoder.decode(key, "UTF-8")
+                    val decodedVal = URLDecoder.decode(value, "UTF-8")
+                    if (decodedKey.isNotBlank()) {
+                        result[decodedKey] = decodedVal
+                    }
+                }
+            }
+            parsePart(encodedQuery)
+            parsePart(encodedFragment)
+            return result
+        }
 
         fun sanitizeBucketName(raw: String?): String {
             val cleaned = raw.orEmpty()

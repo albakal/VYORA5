@@ -20,6 +20,10 @@
     <string name="supabase_keys_required_error">Set SUPABASE_URL &amp; SUPABASE_PUBLISHABLE_KEY in Secrets to connect to the database.</string>
     <string name="auth_signing_in">Signing in…</string>
     <string name="auth_cancelled">Sign-in was cancelled. Tap to try again.</string>
+    <string name="auth_google_browser_fallback">Or continue with Google in browser (OAuth)</string>
+    <string name="auth_google_browser_opened">Complete Google sign-in in your browser to return to VYORA.</string>
+    <string name="auth_no_browser_error">No web browser app found to open Google sign-in.</string>
+    <string name="oauth_callback_failed">Google OAuth sign-in failed. Ensure vyora://auth-callback is listed in Supabase Redirect URLs.</string>
 
     <!-- Navigation Tabs -->
     <string name="nav_home">Home</string>

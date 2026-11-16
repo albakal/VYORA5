@@ -24,9 +24,18 @@
 - `SUPABASE_URL`: رابط مشروعك في Supabase (مثال: `https://<project-ref>.supabase.co`)
 - `SUPABASE_PUBLISHABLE_KEY`: المفتاح العام للعميل (Publishable / `anon` key المحمي بسياسات RLS)
 - `SUPABASE_STORAGE_BUCKET`: اسم حاوية التخزين (الافتراضي: `vyora-media`)
-- `SUPABASE_GOOGLE_WEB_CLIENT_ID`: *(اختياري)* معرّف Web OAuth Client ID إذا أردت تفعيل زر المتابعة بحساب Google
+- `SUPABASE_GOOGLE_WEB_CLIENT_ID`: معرّف Web OAuth Client ID الخاص بجوجل (الافتراضي في التطبيق مضبوط على `10645768320-m2fq6i9v657hk9kgv0of5icpst3b2mkd.apps.googleusercontent.com`)
 
 > ⚠️ **تنبيه أمني**: أي قيمة يتم تمريرها عبر `BuildConfig` تندمج داخل حزمة Android APK ويمكن استخراجها بالهندسة العكسية؛ لذلك استخدم **فقط** المفتاح العام المحمي بسياسات RLS (`SUPABASE_PUBLISHABLE_KEY`) داخل تطبيق الأندرويد، ولا تضع أبداً المفتاح السري (`SUPABASE_SECRET_KEY` / `service_role`) أو `AGORA_APP_CERTIFICATE` في `.env` أو داخل الكود.
+
+### إعداد روابط إعادة التوجيه (OAuth Redirect URLs) لتسجيل الدخول عبر Gmail:
+1. في لوحة **Supabase → Authentication → URL Configuration → Redirect URLs** أضف الرابط:
+   `vyora://auth-callback`
+2. في **Google Cloud Console → Credentials → Web Client ID** تأكد من وجود رابط Callback في **Authorized redirect URIs**:
+   `https://rqvngettikcgwigngdlo.supabase.co/auth/v1/callback`
+3. في لوحة **Supabase → Authentication → Providers → Google**:
+   - فعّل **Enable Sign in with Google**
+   - ضع Web Client ID في **Client IDs** و Client Secret في **Client Secret**.
 
 ---
 

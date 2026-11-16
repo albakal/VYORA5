@@ -20,6 +20,10 @@
     <string name="supabase_keys_required_error">يرجى ضبط SUPABASE_URL و SUPABASE_PUBLISHABLE_KEY في Secrets للاتصال بقاعدة البيانات.</string>
     <string name="auth_signing_in">جاري تسجيل الدخول…</string>
     <string name="auth_cancelled">تم إلغاء تسجيل الدخول. اضغط للمحاولة مجدداً.</string>
+    <string name="auth_google_browser_fallback">أو المتابعة عبر متصفح جوجل (OAuth)</string>
+    <string name="auth_google_browser_opened">أكمل تسجيل الدخول في المتصفح وسيتم إعادتك تلقائياً إلى VYORA.</string>
+    <string name="auth_no_browser_error">لم يتم العثور على تطبيق متصفح لفتح تسجيل دخول جوجل.</string>
+    <string name="oauth_callback_failed">تعذر إتمام تسجيل الدخول عبر جوجل. تأكد من إضافة vyora://auth-callback في Redirect URLs بلوحة Supabase.</string>
 
     <!-- Navigation Tabs -->
     <string name="nav_home">الرئيسية</string>

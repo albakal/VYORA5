@@ -1,7 +1,10 @@
 package com.example.ui.auth
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.util.Log
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
@@ -11,6 +14,7 @@ import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.NoCredentialException
 import com.example.BuildConfig
+import com.example.R
 import com.example.data.remote.SupabaseClient
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
@@ -22,9 +26,21 @@ import kotlinx.coroutines.withContext
 import java.security.MessageDigest
 import java.util.UUID
 
-fun isGoogleSignInConfigured(): Boolean =
-    BuildConfig.SUPABASE_GOOGLE_WEB_CLIENT_ID.trim().isNotBlank() &&
-        !BuildConfig.SUPABASE_GOOGLE_WEB_CLIENT_ID.contains("YOUR_GOOGLE_WEB_CLIENT_ID")
+const val DEFAULT_GOOGLE_WEB_CLIENT_ID =
+    "10645768320-m2fq6i9v657hk9kgv0of5icpst3b2mkd.apps.googleusercontent.com"
+
+fun resolveGoogleWebClientId(
+    configuredValue: String = BuildConfig.SUPABASE_GOOGLE_WEB_CLIENT_ID
+): String {
+    val cleaned = configuredValue.trim()
+    return if (cleaned.isBlank() || cleaned.contains("YOUR_GOOGLE_WEB_CLIENT_ID", ignoreCase = true)) {
+        DEFAULT_GOOGLE_WEB_CLIENT_ID
+    } else {
+        cleaned
+    }
+}
+
+fun isGoogleSignInConfigured(): Boolean = resolveGoogleWebClientId().isNotBlank()
 
 fun restoreSupabaseSession(
     context: Context,
@@ -43,24 +59,67 @@ fun restoreSupabaseSession(
     }
 }
 
+fun launchGoogleBrowserOAuth(
+    context: Context,
+    scope: CoroutineScope,
+    onLaunched: () -> Unit,
+    onAuthError: (String) -> Unit
+) {
+    val supabase = SupabaseClient.getInstance(context)
+    if (!supabase.isConfigured) {
+        onAuthError(context.getString(R.string.supabase_keys_required_error))
+        return
+    }
+    scope.launch {
+        launchGoogleBrowserOAuthSuspend(
+            context = context,
+            supabase = supabase,
+            onLaunched = onLaunched,
+            onAuthError = onAuthError
+        )
+    }
+}
+
+private suspend fun launchGoogleBrowserOAuthSuspend(
+    context: Context,
+    supabase: SupabaseClient,
+    onLaunched: () -> Unit,
+    onAuthError: (String) -> Unit
+) {
+    try {
+        val authUrl = supabase.prepareGoogleOAuthUrl()
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(authUrl)).apply {
+            addCategory(Intent.CATEGORY_BROWSABLE)
+            if (context !is Activity) {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        }
+        context.startActivity(intent)
+        onLaunched()
+    } catch (e: ActivityNotFoundException) {
+        Log.e("Auth", "No browser app found for OAuth", e)
+        onAuthError(context.getString(R.string.auth_no_browser_error))
+    } catch (e: Exception) {
+        Log.e("Auth", "Browser Google OAuth launch failed", e)
+        onAuthError(e.localizedMessage ?: context.getString(R.string.oauth_callback_failed))
+    }
+}
+
 fun onGoogleSignInClicked(
     context: Context,
     credentialManager: CredentialManager,
     onAuthSuccess: () -> Unit,
     onAuthError: (String) -> Unit,
     onAuthCancelled: () -> Unit,
+    onBrowserFlowStarted: () -> Unit = {},
     scope: CoroutineScope
 ) {
     val supabase = SupabaseClient.getInstance(context)
     if (!supabase.isConfigured) {
-        onAuthError(context.getString(com.example.R.string.supabase_keys_required_error))
+        onAuthError(context.getString(R.string.supabase_keys_required_error))
         return
     }
-    if (!isGoogleSignInConfigured()) {
-        onAuthError(context.getString(com.example.R.string.gmail_client_id_missing))
-        return
-    }
-    val clientId = BuildConfig.SUPABASE_GOOGLE_WEB_CLIENT_ID.trim()
+    val clientId = resolveGoogleWebClientId()
     val rawNonce = UUID.randomUUID().toString()
     val hashedNonce = MessageDigest.getInstance("SHA-256")
         .digest(rawNonce.toByteArray(Charsets.UTF_8))
@@ -84,17 +143,32 @@ fun onGoogleSignInClicked(
                     .onSuccess { onAuthSuccess() }
                     .onFailure { e -> onAuthError(e.localizedMessage ?: "Supabase sign-in failed") }
             } else {
-                onAuthError("Unexpected credential type")
+                launchGoogleBrowserOAuthSuspend(
+                    context = context,
+                    supabase = supabase,
+                    onLaunched = onBrowserFlowStarted,
+                    onAuthError = onAuthError
+                )
             }
         } catch (e: GetCredentialCancellationException) {
             Log.w("Auth", "Google Sign-In cancelled: ${e.message}", e)
             onAuthCancelled()
         } catch (e: NoCredentialException) {
-            Log.w("Auth", "No Google credentials available: ${e.message}", e)
-            onAuthError("No Google account found on this device.")
+            Log.w("Auth", "Credential Manager has no credential; falling back to Browser OAuth", e)
+            launchGoogleBrowserOAuthSuspend(
+                context = context,
+                supabase = supabase,
+                onLaunched = onBrowserFlowStarted,
+                onAuthError = onAuthError
+            )
         } catch (e: GetCredentialException) {
-            Log.e("Auth", "Credential Manager error", e)
-            onAuthError(e.localizedMessage ?: "Sign in failed")
+            Log.w("Auth", "Credential Manager unavailable (${e.type}); falling back to Browser OAuth", e)
+            launchGoogleBrowserOAuthSuspend(
+                context = context,
+                supabase = supabase,
+                onLaunched = onBrowserFlowStarted,
+                onAuthError = onAuthError
+            )
         } catch (e: Exception) {
             Log.e("Auth", "Google Sign-In failed", e)
             onAuthError(e.localizedMessage ?: "Sign in failed")

@@ -1,10 +1,12 @@
 package com.example
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import kotlinx.coroutines.flow.MutableStateFlow
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -134,10 +136,13 @@ object VyoraRoutes {
 }
 
 class MainActivity : ComponentActivity() {
+    private val pendingOAuthCallbackUri = MutableStateFlow<Uri?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         LocalNotificationHelper.ensureChannel(this)
+        captureOAuthIntent(intent)
 
         setContent {
             val context = LocalContext.current
@@ -146,9 +151,25 @@ class MainActivity : ComponentActivity() {
             val prefsRepo = remember(context) { AppPreferencesRepository(context.applicationContext) }
             val prefs by prefsRepo.preferencesFlow.collectAsStateWithLifecycle(initialValue = AppPreferences())
             val currentUser by supabase.authState.collectAsStateWithLifecycle()
+            val incomingAuthUri by pendingOAuthCallbackUri.collectAsStateWithLifecycle()
+            var oauthProcessing by remember { mutableStateOf(false) }
+            var oauthErrorMessage by remember { mutableStateOf<String?>(null) }
 
             LaunchedEffect(Unit) {
                 restoreSupabaseSession(context = context, scope = scope)
+            }
+
+            LaunchedEffect(incomingAuthUri) {
+                val uri = incomingAuthUri ?: return@LaunchedEffect
+                pendingOAuthCallbackUri.value = null
+                oauthProcessing = true
+                oauthErrorMessage = null
+                supabase.handleOAuthCallbackUri(uri)
+                    .onFailure { err ->
+                        oauthErrorMessage = err.localizedMessage
+                            ?: context.getString(R.string.oauth_callback_failed)
+                    }
+                oauthProcessing = false
             }
 
             VyoraTheme(themeMode = prefs.themeMode, language = prefs.language) {
@@ -164,7 +185,10 @@ class MainActivity : ComponentActivity() {
                         initialReferralCode = prefs.pendingReferralCode,
                         onReferralCodeChanged = { code ->
                             scope.launch { prefsRepo.setPendingReferralCode(code) }
-                        }
+                        },
+                        externalErrorMessage = oauthErrorMessage,
+                        externalLoading = oauthProcessing,
+                        onClearExternalError = { oauthErrorMessage = null }
                     )
                 } else {
                     key(user.uid) {
@@ -212,6 +236,19 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        captureOAuthIntent(intent)
+    }
+
+    private fun captureOAuthIntent(intent: Intent?) {
+        val data = intent?.data
+        if (SupabaseClient.isOAuthCallbackUri(data)) {
+            pendingOAuthCallbackUri.value = data
         }
     }
 }

@@ -93,7 +93,10 @@ fun AuthScreen(
     onToggleLanguage: () -> Unit,
     onAuthSuccess: () -> Unit,
     initialReferralCode: String = "",
-    onReferralCodeChanged: (String) -> Unit = {}
+    onReferralCodeChanged: (String) -> Unit = {},
+    externalErrorMessage: String? = null,
+    externalLoading: Boolean = false,
+    onClearExternalError: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -112,6 +115,8 @@ fun AuthScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var infoMessage by remember { mutableStateOf<String?>(null) }
     var apkStatusMessage by remember { mutableStateOf<String?>(null) }
+    val effectiveLoading = isLoading || externalLoading
+    val visibleError = errorMessage ?: externalErrorMessage
 
     Box(
         modifier = Modifier
@@ -249,6 +254,7 @@ fun AuthScreen(
                             isLoading = true
                             errorMessage = null
                             infoMessage = null
+                            onClearExternalError()
                             onGoogleSignInClicked(
                                 context = context,
                                 credentialManager = credentialManager,
@@ -264,10 +270,14 @@ fun AuthScreen(
                                     isLoading = false
                                     errorMessage = context.getString(R.string.auth_cancelled)
                                 },
+                                onBrowserFlowStarted = {
+                                    isLoading = false
+                                    infoMessage = context.getString(R.string.auth_google_browser_opened)
+                                },
                                 scope = scope
                             )
                         },
-                        enabled = !isLoading,
+                        enabled = !effectiveLoading,
                         shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary
@@ -277,7 +287,7 @@ fun AuthScreen(
                             .height(56.dp)
                             .testTag("google_sign_in_button")
                     ) {
-                        if (isLoading && !showEmailAuth) {
+                        if (effectiveLoading && !showEmailAuth) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(22.dp),
                                 color = Color.White,
@@ -310,14 +320,44 @@ fun AuthScreen(
                         }
                     }
 
-                    if (errorMessage != null) {
+                    TextButton(
+                        onClick = {
+                            isLoading = true
+                            errorMessage = null
+                            infoMessage = null
+                            onClearExternalError()
+                            launchGoogleBrowserOAuth(
+                                context = context,
+                                scope = scope,
+                                onLaunched = {
+                                    isLoading = false
+                                    infoMessage = context.getString(R.string.auth_google_browser_opened)
+                                },
+                                onAuthError = { msg ->
+                                    isLoading = false
+                                    errorMessage = msg
+                                }
+                            )
+                        },
+                        enabled = !effectiveLoading,
+                        modifier = Modifier.testTag("google_browser_oauth_button")
+                    ) {
+                        Text(
+                            text = vString(R.string.auth_google_browser_fallback),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = NeonCyan,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+
+                    if (visibleError != null) {
                         Surface(
                             color = MaterialTheme.colorScheme.error.copy(alpha = 0.14f),
                             shape = MaterialTheme.shapes.medium,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                text = errorMessage.orEmpty(),
+                                text = visibleError,
                                 color = MaterialTheme.colorScheme.error,
                                 style = MaterialTheme.typography.bodyMedium,
                                 modifier = Modifier.padding(12.dp),
@@ -484,7 +524,7 @@ fun AuthScreen(
                                 }
                             }
                         },
-                        enabled = !isLoading,
+                        enabled = !effectiveLoading,
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .fillMaxWidth()
