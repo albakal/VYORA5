@@ -16,17 +16,15 @@ object LocalNotificationHelper {
     private const val CHANNEL_NAME = "VYORA Activity"
 
     fun ensureChannel(context: Context) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                CHANNEL_NAME,
-                NotificationManager.IMPORTANCE_DEFAULT
-            ).apply {
-                description = "Likes, comments, followers, messages, and live stream alerts"
-            }
-            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-            manager?.createNotificationChannel(channel)
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            CHANNEL_NAME,
+            NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            description = "Likes, comments, followers, messages, and live stream alerts"
         }
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        manager?.createNotificationChannel(channel)
     }
 
     fun showNotification(context: Context, id: Int, title: String, body: String) {
