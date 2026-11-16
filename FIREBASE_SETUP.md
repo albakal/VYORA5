@@ -17,3 +17,7 @@ VYORA uses **Firebase Authentication (Google Sign-In)**, **Cloud Firestore** (na
 
 ## 4. Optional Live Video Broadcast (Agora)
 - Add `AGORA_APP_ID` in AI Studio **Secrets** if you want multi-viewer Agora RTC video streaming alongside Firebase live rooms and chat.
+
+## 5. GitHub Actions APK Build (`build-apk.yml`)
+- The workflow checks for `app/google-services.json` in the repository first.
+- If `app/google-services.json` is omitted when pushing to GitHub, either upload `app/google-services.json` directly into `app/` or add a GitHub Actions Secret named `GOOGLE_SERVICES_JSON` containing the contents of `app/google-services.json` (or `GOOGLE_SERVICES_JSON_BASE64`).
