@@ -3,10 +3,8 @@ package com.example
 import android.content.Context
 import android.content.res.Configuration
 import androidx.test.core.app.ApplicationProvider
-import com.example.data.remote.SupabaseClient
-import com.example.data.remote.toAdminSettings
+import com.example.data.model.AdminSettings
 import com.example.ui.feed.WatchWheelLogic
-import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -21,45 +19,28 @@ import java.util.Locale
 class WatchWheelAndUploadTest {
 
     @Test
-    fun `sanitizeBucketName falls back to vyora-media on blank quotes or placeholders`() {
-        assertEquals("vyora-media", SupabaseClient.sanitizeBucketName(null))
-        assertEquals("vyora-media", SupabaseClient.sanitizeBucketName(""))
-        assertEquals("vyora-media", SupabaseClient.sanitizeBucketName("   "))
-        assertEquals("vyora-media", SupabaseClient.sanitizeBucketName("\"vyora-media\""))
-        assertEquals("vyora-media", SupabaseClient.sanitizeBucketName("/vyora-media/"))
-        assertEquals("vyora-media", SupabaseClient.sanitizeBucketName("YOUR_STORAGE_BUCKET"))
-        assertEquals("custom-media", SupabaseClient.sanitizeBucketName("  'custom-media/' "))
-    }
-
-    @Test
-    fun `toAdminSettings parses watch wheel admin toggle and parameters accurately`() {
-        val disabledJson = JSONObject(
-            """
-            {
-              "id": "global",
-              "point_value_usd": 0.02,
-              "min_withdrawal_usd": 5.0,
-              "rewards_enabled": true,
-              "max_video_duration_sec": 120,
-              "watch_wheel_enabled": false,
-              "watch_wheel_cycle_sec": 45,
-              "watch_wheel_points_per_cycle": 10,
-              "watch_wheel_daily_cap_cycles": 40
-            }
-            """.trimIndent()
-        )
-        val disabled = disabledJson.toAdminSettings()
-        assertFalse(disabled.watchWheelEnabled)
-        assertEquals(45L, disabled.watchWheelCycleSec)
-        assertEquals(10L, disabled.watchWheelPointsPerCycle)
-        assertEquals(40L, disabled.watchWheelDailyCapCycles)
-
-        val defaultJson = JSONObject("""{"id":"global"}""")
-        val defaults = defaultJson.toAdminSettings()
+    fun `adminSettings model provides valid watch wheel defaults and custom toggles`() {
+        val defaults = AdminSettings(id = "global")
         assertTrue(defaults.watchWheelEnabled)
         assertEquals(30L, defaults.watchWheelCycleSec)
         assertEquals(5L, defaults.watchWheelPointsPerCycle)
         assertEquals(60L, defaults.watchWheelDailyCapCycles)
+
+        val disabled = AdminSettings(
+            id = "global",
+            pointValueUsd = 0.02,
+            minWithdrawalUsd = 5.0,
+            rewardsEnabled = true,
+            maxVideoDurationSec = 120L,
+            watchWheelEnabled = false,
+            watchWheelCycleSec = 45L,
+            watchWheelPointsPerCycle = 10L,
+            watchWheelDailyCapCycles = 40L
+        )
+        assertFalse(disabled.watchWheelEnabled)
+        assertEquals(45L, disabled.watchWheelCycleSec)
+        assertEquals(10L, disabled.watchWheelPointsPerCycle)
+        assertEquals(40L, disabled.watchWheelDailyCapCycles)
     }
 
     @Test

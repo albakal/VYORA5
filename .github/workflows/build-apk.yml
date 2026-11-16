@@ -43,28 +43,13 @@ jobs:
         with:
           gradle-version: 9.3.1
 
-      - name: Prepare Supabase environment config
+      - name: Prepare environment config
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
-          SUPABASE_STORAGE_BUCKET: ${{ secrets.SUPABASE_STORAGE_BUCKET }}
-          SUPABASE_GOOGLE_WEB_CLIENT_ID: ${{ secrets.SUPABASE_GOOGLE_WEB_CLIENT_ID }}
+          AGORA_APP_ID: ${{ secrets.AGORA_APP_ID }}
         run: |
           {
-            if [ -n "$SUPABASE_URL" ]; then
-              printf 'SUPABASE_URL=%s\n' "$SUPABASE_URL"
-            fi
-            if [ -n "$SUPABASE_PUBLISHABLE_KEY" ]; then
-              printf 'SUPABASE_PUBLISHABLE_KEY=%s\n' "$SUPABASE_PUBLISHABLE_KEY"
-            fi
-            if [ -n "$SUPABASE_STORAGE_BUCKET" ]; then
-              printf 'SUPABASE_STORAGE_BUCKET=%s\n' "$SUPABASE_STORAGE_BUCKET"
-            fi
-            if [ -n "$SUPABASE_GOOGLE_WEB_CLIENT_ID" ]; then
-              printf 'SUPABASE_GOOGLE_WEB_CLIENT_ID=%s\n' "$SUPABASE_GOOGLE_WEB_CLIENT_ID"
-            fi
+            printf 'AGORA_APP_ID=%s\n' "${AGORA_APP_ID:-}"
           } > .env
-          echo "Supabase config flags -> URL:$([ -n "$SUPABASE_URL" ] && echo SET || echo MISSING) KEY:$([ -n "$SUPABASE_PUBLISHABLE_KEY" ] && echo SET || echo MISSING) GOOGLE_WEB_CLIENT_ID:$([ -n "$SUPABASE_GOOGLE_WEB_CLIENT_ID" ] && echo SET || echo MISSING)"
 
       - name: Prepare signing keystore & build APK
         env:
@@ -115,6 +100,6 @@ jobs:
         with:
           tag_name: vyora-latest
           name: VYORA Latest Android APK
-          body: Automated Android APK build for VYORA (Pure Supabase Edition).
+          body: Automated Android APK build for VYORA (Firebase Edition).
           files: VYORA.apk
           make_latest: true

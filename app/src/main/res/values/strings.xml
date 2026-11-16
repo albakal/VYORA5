@@ -4,26 +4,14 @@
     <!-- Auth -->
     <string name="auth_tagline">Create. Stream. Shine in Motion.</string>
     <string name="auth_subtitle">Real-time short videos, interactive live rooms, instant chat, and creator rewards.</string>
-    <string name="auth_sign_in">Sign In</string>
-    <string name="auth_create_account">Create Account</string>
-    <string name="auth_display_name">Display Name</string>
-    <string name="auth_email">Email</string>
-    <string name="auth_password">Password</string>
-    <string name="auth_invalid_credentials_hint">Enter a valid email and a password of at least 6 characters.</string>
-    <string name="supabase_auth_ready">Connected to Supabase Backend</string>
-    <string name="supabase_config_missing">Set SUPABASE_URL &amp; SUPABASE_PUBLISHABLE_KEY in Secrets to enable cloud sync</string>
-    <string name="sign_in_google">Continue with Gmail</string>
-    <string name="gmail_auth_hint">Sign in or create your creator account in one tap using your Gmail account.</string>
-    <string name="auth_or_email_toggle">Or sign in with Email &amp; Password</string>
-    <string name="auth_hide_email_toggle">Hide Email &amp; Password form</string>
-    <string name="gmail_client_id_missing">Set SUPABASE_GOOGLE_WEB_CLIENT_ID in Secrets to activate direct Gmail sign-in.</string>
-    <string name="supabase_keys_required_error">Set SUPABASE_URL &amp; SUPABASE_PUBLISHABLE_KEY in Secrets to connect to the database.</string>
+    <string name="firebase_auth_ready">Connected to Firebase Cloud &amp; Google Sign-In</string>
+    <string name="sign_in_google">Continue with Google</string>
+    <string name="gmail_auth_hint">Sign in or create your creator account in one tap using your Google account.</string>
+    <string name="firebase_client_id_missing">Google Web Client ID is missing from google-services.json.</string>
+    <string name="firebase_google_signin_failed">Unable to complete Google Sign-In with Firebase. Please try again.</string>
+    <string name="firebase_no_google_account">No Google account found on this device. Please add a Google account in Settings.</string>
     <string name="auth_signing_in">Signing in…</string>
     <string name="auth_cancelled">Sign-in was cancelled. Tap to try again.</string>
-    <string name="auth_google_browser_fallback">Or continue with Google in browser (OAuth)</string>
-    <string name="auth_google_browser_opened">Complete Google sign-in in your browser to return to VYORA.</string>
-    <string name="auth_no_browser_error">No web browser app found to open Google sign-in.</string>
-    <string name="oauth_callback_failed">Google OAuth sign-in failed. Ensure vyora://auth-callback is listed in Supabase Redirect URLs.</string>
 
     <!-- Navigation Tabs -->
     <string name="nav_home">Home</string>
@@ -101,8 +89,8 @@
     <string name="start_live_btn">Start Live Broadcast</string>
     <string name="end_live_btn">End Broadcast</string>
     <string name="live_viewers">%1$d watching</string>
-    <string name="agora_missing_warning">Deploy the Supabase Edge Function (get-agora-token) and set AGORA_APP_ID &amp; AGORA_APP_CERTIFICATE in Supabase Secrets for live video streaming. Live chat &amp; stats are active.</string>
-    <string name="live_preview_local_note">Local camera preview is active. Configure get-agora-token &amp; Agora Secrets in Supabase to broadcast to viewers.</string>
+    <string name="agora_missing_warning">Configure AGORA_APP_ID in Secrets to enable multi-viewer live streaming. Live chat &amp; stats are active.</string>
+    <string name="live_preview_local_note">Local camera preview is active. Configure AGORA_APP_ID in Secrets to broadcast video to viewers.</string>
     <string name="retry">Retry</string>
     <string name="no_live_streams">No active live streams right now.</string>
 
@@ -145,10 +133,9 @@
     <string name="request_withdrawal">Request Withdrawal</string>
     <string name="min_withdrawal_note">Minimum withdrawal: $%1$.2f</string>
     <string name="transactions_history">Earnings History</string>
-    <string name="supabase_ledger_title">Supabase Accounting Ledger</string>
-    <string name="supabase_ledger_synced">Synced • %1$d entries • %2$d videos</string>
-    <string name="supabase_ledger_pending_config">Configure SUPABASE_URL &amp; SUPABASE_PUBLISHABLE_KEY in Secrets and run /supabase/schema.sql</string>
-    <string name="supabase_ledger_checking">Checking accounting sync…</string>
+    <string name="firebase_ledger_title">Firebase Cloud Ledger</string>
+    <string name="firebase_ledger_synced">Synced • %1$d entries • %2$d videos</string>
+    <string name="firebase_ledger_checking">Checking Firebase cloud sync…</string>
     <string name="sync_now">Sync</string>
 
     <!-- Admin -->
@@ -180,24 +167,23 @@
     <string name="earn_invited_friends">Invited Friends</string>
     <string name="earn_completed_friends">Completed Friends</string>
     <string name="earn_my_daily_usage">My Today Active Usage</string>
-    <string name="earn_referral_code_title">Your Unique Referral Code</string>
-    <string name="earn_copy_code">Copy Code</string>
+    <string name="earn_invite_link_title">Your Direct Invite Link</string>
+    <string name="earn_copy_link">Copy Link</string>
     <string name="earn_share_invite">Share Invite</string>
-    <string name="earn_code_copied">Referral code copied!</string>
-    <string name="earn_share_message">Join VYORA and use my referral code %1$s when signing up!</string>
-    <string name="earn_redeem_title">Have a Friend\'s Referral Code?</string>
-    <string name="earn_redeem_hint">Enter referral code (1 time only)</string>
-    <string name="earn_redeem_submit">Apply Code</string>
-    <string name="earn_redeemed_badge">Linked to code: %1$s</string>
+    <string name="earn_link_copied">Invite link copied!</string>
+    <string name="earn_share_link_message">Join VYORA via my invite link so your invite is linked automatically: %1$s</string>
+    <string name="earn_auto_invite_ready">Invite link detected — it will be linked automatically after Google Sign-In.</string>
+    <string name="earn_auto_attribution_title">Automatic Invite Attribution</string>
+    <string name="earn_auto_link_hint">Friends are linked automatically when they tap your invite link and open the app.</string>
+    <string name="earn_redeemed_badge">Invite link activated automatically for this account</string>
     <string name="earn_friends_progress_title">Invited Friends Progress (%1$d/%2$d)</string>
-    <string name="earn_no_friends_yet">No friends joined with your code yet. Share your code to start!</string>
+    <string name="earn_no_friends_yet">No friends joined with your invite link yet. Share your link to start!</string>
     <string name="earn_friend_days">Days: %1$d / %2$d</string>
     <string name="earn_friend_minutes">Today Usage: %1$d / %2$d min</string>
     <string name="earn_friend_videos">Today Videos: %1$d / %2$d</string>
     <string name="earn_friend_completed">Completed</string>
     <string name="earn_friend_under_review">Device Under Review</string>
     <string name="earn_security_notice">One eligible account per phone. Shared family phones can be reviewed by admins.</string>
-    <string name="earn_auth_referral_label">Referral Code (Optional)</string>
     <string name="earn_admin_enable_toggle">Enable Earn With Us Program</string>
     <string name="earn_admin_suspicious_devices">Suspicious / Shared Devices</string>
     <string name="earn_admin_approve_exception">Approve Family Exception</string>

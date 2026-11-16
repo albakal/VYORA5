@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PauseCircle
 import androidx.compose.material.icons.filled.Refresh
@@ -45,7 +46,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -53,9 +53,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -102,7 +99,11 @@ fun EarnWithUsScreen(
 
     val dash = dashboardState ?: EarnDashboardState()
     val cfg = dash.config
-    var referralInput by remember { mutableStateOf("") }
+    val inviteLink = if (dash.referralCode.isNotBlank()) {
+        EarnLogic.buildReferralInviteUri(dash.referralCode)
+    } else {
+        ""
+    }
 
     val (statusLabel, statusColor) = when (dash.status) {
         "under_review" -> vString(R.string.earn_status_under_review) to AmberGold
@@ -338,7 +339,7 @@ fun EarnWithUsScreen(
                     }
                 }
 
-                // User's Own Daily Progress (Relevant when user was invited as a friend too)
+                // User's Own Daily Progress
                 item {
                     Card(
                         shape = MaterialTheme.shapes.large,
@@ -380,7 +381,7 @@ fun EarnWithUsScreen(
                     }
                 }
 
-                // Unique Referral Code Card with Copy & Share
+                // Direct Automatic Invite Link Card (Copy Link & Share Link)
                 item {
                     Card(
                         shape = MaterialTheme.shapes.large,
@@ -390,51 +391,61 @@ fun EarnWithUsScreen(
                             modifier = Modifier.padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Text(
-                                text = vString(R.string.earn_referral_code_title),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.Link, contentDescription = null, tint = NeonCyan)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = vString(R.string.earn_invite_link_title),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                             Surface(
                                 shape = RoundedCornerShape(14.dp),
                                 color = ElectricViolet.copy(alpha = 0.14f),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text(
-                                    text = dash.referralCode.ifBlank { "…" },
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    fontWeight = FontWeight.ExtraBold,
+                                    text = inviteLink.ifBlank { "…" },
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Bold,
                                     color = NeonCyan,
                                     modifier = Modifier
                                         .padding(14.dp)
-                                        .testTag("earn_my_referral_code")
+                                        .testTag("earn_my_referral_link")
                                 )
                             }
-                            val copiedMsg = vString(R.string.earn_code_copied)
-                            val shareText = vString(R.string.earn_share_message, dash.referralCode)
+                            Text(
+                                text = vString(R.string.earn_auto_link_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            val copiedMsg = vString(R.string.earn_link_copied)
+                            val shareText = vString(R.string.earn_share_link_message, inviteLink)
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 OutlinedButton(
                                     onClick = {
-                                        if (dash.referralCode.isNotBlank()) {
-                                            clipboard.setText(AnnotatedString(dash.referralCode))
+                                        if (inviteLink.isNotBlank()) {
+                                            clipboard.setText(AnnotatedString(inviteLink))
                                             viewModel.showToast(copiedMsg)
                                         }
                                     },
-                                    enabled = dash.referralCode.isNotBlank(),
+                                    enabled = inviteLink.isNotBlank(),
                                     modifier = Modifier
                                         .weight(1f)
-                                        .testTag("earn_copy_code_button")
+                                        .testTag("earn_copy_link_button")
                                 ) {
                                     Icon(Icons.Filled.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text(vString(R.string.earn_copy_code))
+                                    Text(vString(R.string.earn_copy_link))
                                 }
                                 Button(
                                     onClick = {
-                                        if (dash.referralCode.isNotBlank()) {
+                                        if (inviteLink.isNotBlank()) {
                                             val sendIntent = Intent(Intent.ACTION_SEND).apply {
                                                 type = "text/plain"
                                                 putExtra(Intent.EXTRA_TEXT, shareText)
@@ -442,11 +453,11 @@ fun EarnWithUsScreen(
                                             context.startActivity(Intent.createChooser(sendIntent, null))
                                         }
                                     },
-                                    enabled = dash.referralCode.isNotBlank(),
+                                    enabled = inviteLink.isNotBlank(),
                                     colors = ButtonDefaults.buttonColors(containerColor = ElectricViolet),
                                     modifier = Modifier
                                         .weight(1f)
-                                        .testTag("earn_share_code_button")
+                                        .testTag("earn_share_link_button")
                                 ) {
                                     Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
@@ -457,7 +468,7 @@ fun EarnWithUsScreen(
                     }
                 }
 
-                // Enter Friend Referral Code (1-time only)
+                // Automatic Attribution Status + Security Note (no manual input field)
                 item {
                     Card(
                         shape = MaterialTheme.shapes.large,
@@ -471,7 +482,7 @@ fun EarnWithUsScreen(
                                 Icon(Icons.Filled.Security, contentDescription = null, tint = ElectricViolet)
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = vString(R.string.earn_redeem_title),
+                                    text = vString(R.string.earn_auto_attribution_title),
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -489,30 +500,11 @@ fun EarnWithUsScreen(
                                         Icon(Icons.Filled.Lock, contentDescription = null, tint = EmeraldLive, modifier = Modifier.size(18.dp))
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text(
-                                            text = vString(R.string.earn_redeemed_badge, dash.referredByCode),
+                                            text = vString(R.string.earn_redeemed_badge),
                                             color = EmeraldLive,
                                             fontWeight = FontWeight.SemiBold
                                         )
                                     }
-                                }
-                            } else {
-                                OutlinedTextField(
-                                    value = referralInput,
-                                    onValueChange = { referralInput = EarnLogic.sanitizeReferralCode(it) },
-                                    label = { Text(vString(R.string.earn_redeem_hint)) },
-                                    singleLine = true,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .testTag("earn_redeem_input")
-                                )
-                                Button(
-                                    onClick = { viewModel.redeemReferralCode(referralInput) },
-                                    enabled = cfg.isEnabled && !isBusy && EarnLogic.isValidReferralCodeFormat(referralInput),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .testTag("earn_redeem_submit_button")
-                                ) {
-                                    Text(vString(R.string.earn_redeem_submit))
                                 }
                             }
                             Text(

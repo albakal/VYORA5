@@ -28,12 +28,9 @@ import com.example.data.model.WithdrawalRequest
 import com.example.data.preferences.AppPreferencesRepository
 import com.example.data.remote.AgoraLiveSession
 import com.example.data.remote.EarnProgramRepository
+import com.example.data.remote.FirebaseBackendRepository
+import com.example.data.remote.FirebaseCloudSummary
 import com.example.data.remote.StorageMediaRepository
-import com.example.data.remote.SupabaseBackendRepository
-import com.example.data.remote.SupabaseClient
-import com.example.data.remote.SupabaseClientDiagnostics
-import com.example.data.remote.SupabaseLedgerClient
-import com.example.data.remote.SupabaseWalletSummary
 import com.example.data.remote.UploadStatus
 import com.example.data.repository.ChatRepository
 import com.example.data.repository.LiveRepository
@@ -45,10 +42,10 @@ import com.example.security.DeviceIntegrityHelper
 import com.example.security.DeviceIntegrityInfo
 import com.example.ui.feed.WatchWheelLogic
 import com.example.ui.feed.WatchWheelUiState
+import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -70,20 +67,14 @@ sealed interface UiState<out T> {
 
 sealed interface LedgerSyncState {
     data object Checking : LedgerSyncState
-    data class Synced(
-        val summary: SupabaseWalletSummary,
-        val diagnostics: SupabaseClientDiagnostics
-    ) : LedgerSyncState
-    data class PendingSetup(
-        val diagnostics: SupabaseClientDiagnostics,
-        val serverDeployed: Boolean
-    ) : LedgerSyncState
+    data class Synced(val summary: FirebaseCloudSummary) : LedgerSyncState
+    data class Error(val message: String) : LedgerSyncState
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class VyoraAppViewModel(
     val currentUserId: String,
-    private val supabaseClient: SupabaseClient,
+    private val auth: FirebaseAuth,
     private val userRepo: UserRepository,
     private val videoRepo: VideoRepository,
     private val chatRepo: ChatRepository,
@@ -91,9 +82,8 @@ class VyoraAppViewModel(
     private val notifRepo: NotificationRepository,
     private val walletAdminRepo: WalletAdminRepository,
     private val storageRepo: StorageMediaRepository,
-    private val backendRepo: SupabaseBackendRepository,
-    private val supabaseLedgerClient: SupabaseLedgerClient = SupabaseLedgerClient(),
-    private val earnRepo: EarnProgramRepository = EarnProgramRepository(supabaseClient),
+    private val backendRepo: FirebaseBackendRepository,
+    private val earnRepo: EarnProgramRepository,
     private val deviceIntegrityHelper: DeviceIntegrityHelper? = null,
     private val prefsRepo: AppPreferencesRepository? = null
 ) : ViewModel() {
@@ -231,13 +221,13 @@ class VyoraAppViewModel(
 
     init {
         viewModelScope.launch {
-            val user = supabaseClient.currentUser
+            val user = auth.currentUser
             if (user != null) {
                 userRepo.ensureUserProfile(
                     uid = user.uid,
-                    email = user.email,
+                    email = user.email.orEmpty(),
                     displayName = user.displayName,
-                    avatarUrl = user.avatarUrl
+                    avatarUrl = user.photoUrl?.toString()
                 )
                 val adminStatus = walletAdminRepo.checkIsAdmin(user.uid, user.email)
                 _isAdmin.value = adminStatus
@@ -250,19 +240,7 @@ class VyoraAppViewModel(
                     prefsRepo?.preferencesFlow?.first()?.pendingReferralCode.orEmpty()
                 }.getOrDefault("")
                 if (pendingCode.isNotBlank()) {
-                    earnRepo.redeemReferralCode(pendingCode, device)
-                        .onSuccess { underReview ->
-                            prefsRepo?.clearPendingReferralCode()
-                            _toastMessage.value = if (underReview) {
-                                "تم تسجيل كود الإحالة والجهاز قيد المراجعة الإدارية"
-                            } else {
-                                "تم تفعيل كود الإحالة بنجاح!"
-                            }
-                        }
-                        .onFailure { err ->
-                            prefsRepo?.clearPendingReferralCode()
-                            _toastMessage.value = err.localizedMessage
-                        }
+                    applyIncomingReferralCode(pendingCode)
                 }
 
                 refreshEarnDashboard()
@@ -299,6 +277,27 @@ class VyoraAppViewModel(
         return collected
     }
 
+    fun applyIncomingReferralCode(rawCode: String) {
+        if (rawCode.isBlank()) return
+        viewModelScope.launch {
+            val device = resolveDeviceIntegrity()
+            earnRepo.redeemReferralCode(rawCode, device)
+                .onSuccess { underReview ->
+                    prefsRepo?.clearPendingReferralCode()
+                    _toastMessage.value = if (underReview) {
+                        "تم تسجيل الدعوة والجهاز قيد المراجعة الإدارية"
+                    } else {
+                        "تم تفعيل رابط الدعوة بنجاح!"
+                    }
+                    earnRepo.fetchDashboard(device).onSuccess { _earnDashboard.value = it }
+                }
+                .onFailure { err ->
+                    prefsRepo?.clearPendingReferralCode()
+                    _toastMessage.value = err.localizedMessage
+                }
+        }
+    }
+
     fun onAppForegroundChanged(inForeground: Boolean) {
         if (!inForeground) {
             heartbeatJob?.cancel()
@@ -326,27 +325,6 @@ class VyoraAppViewModel(
                 .onSuccess { _earnDashboard.value = it }
                 .onFailure { e ->
                     Log.w(TAG, "Earn dashboard load error", e)
-                }
-            _isEarnBusy.value = false
-        }
-    }
-
-    fun redeemReferralCode(rawCode: String) {
-        viewModelScope.launch {
-            _isEarnBusy.value = true
-            val device = resolveDeviceIntegrity()
-            earnRepo.redeemReferralCode(rawCode, device)
-                .onSuccess { underReview ->
-                    prefsRepo?.clearPendingReferralCode()
-                    _toastMessage.value = if (underReview) {
-                        "تم ربط الكود، لكن الحساب/الجهاز قيد المراجعة لمنع تعدد الحسابات"
-                    } else {
-                        "تم تفعيل كود الإحالة بنجاح!"
-                    }
-                    earnRepo.fetchDashboard(device).onSuccess { _earnDashboard.value = it }
-                }
-                .onFailure { err ->
-                    _toastMessage.value = err.localizedMessage ?: "تعذر تفعيل كود الإحالة"
                 }
             _isEarnBusy.value = false
         }
@@ -413,27 +391,20 @@ class VyoraAppViewModel(
     fun refreshAccountingSync() {
         viewModelScope.launch {
             _ledgerSyncState.value = LedgerSyncState.Checking
-            val diagDeferred = async { supabaseLedgerClient.checkPublicCatalogConnectivity() }
-            val summaryDeferred = async { backendRepo.fetchWalletAccountingSummary() }
-
-            val diag = diagDeferred.await()
-            val summaryRes = summaryDeferred.await()
-            val summary = summaryRes.getOrNull()
-
-            _ledgerSyncState.value = if (summary != null && summary.supabaseConfigured && summary.synced) {
-                LedgerSyncState.Synced(summary = summary, diagnostics = diag)
-            } else {
-                LedgerSyncState.PendingSetup(
-                    diagnostics = diag,
-                    serverDeployed = summaryRes.isSuccess
-                )
-            }
+            backendRepo.fetchWalletAccountingSummary()
+                .onSuccess { summary ->
+                    _ledgerSyncState.value = LedgerSyncState.Synced(summary)
+                }
+                .onFailure { err ->
+                    _ledgerSyncState.value = LedgerSyncState.Error(
+                        err.localizedMessage ?: "Unable to sync Firebase ledger"
+                    )
+                }
         }
     }
 
     fun retryFeed() {
         _feedRefreshTrigger.value += 1
-        supabaseClient.notifyChange("videos", "profiles")
         refreshAccountingSync()
     }
 
@@ -443,8 +414,9 @@ class VyoraAppViewModel(
 
     private fun resolveCurrentProfile(): UserProfile? {
         currentUserProfile.value?.let { return it }
-        val authUser = supabaseClient.currentUser ?: return null
-        val fallbackUsername = authUser.email.substringBefore("@")
+        val authUser = auth.currentUser ?: return null
+        val fallbackUsername = (authUser.email ?: "")
+            .substringBefore("@")
             .lowercase()
             .replace(Regex("[^a-z0-9_]"), "_")
             .trim('_')
@@ -453,8 +425,8 @@ class VyoraAppViewModel(
             id = authUser.uid,
             userId = authUser.uid,
             username = fallbackUsername,
-            displayName = authUser.displayName.ifBlank { fallbackUsername },
-            avatarUrl = authUser.avatarUrl
+            displayName = authUser.displayName?.ifBlank { fallbackUsername } ?: fallbackUsername,
+            avatarUrl = authUser.photoUrl?.toString().orEmpty()
         )
     }
 
@@ -568,6 +540,15 @@ class VyoraAppViewModel(
             return
         }
         viewModelScope.launch {
+            val authUser = auth.currentUser
+            if (currentUserProfile.value == null && authUser != null) {
+                userRepo.ensureUserProfile(
+                    uid = authUser.uid,
+                    email = authUser.email.orEmpty(),
+                    displayName = authUser.displayName,
+                    avatarUrl = authUser.photoUrl?.toString()
+                )
+            }
             storageRepo.uploadVideoWithThumbnail(context, currentUserId, videoUri, customCoverUri)
                 .collect { status ->
                     _uploadState.value = status
@@ -726,13 +707,13 @@ class VyoraAppViewModel(
             _toastMessage.value = "Please sign in first."
             return null
         }
-        val authUser = supabaseClient.currentUser
+        val authUser = auth.currentUser
         if (currentUserProfile.value == null && authUser != null) {
             userRepo.ensureUserProfile(
                 uid = authUser.uid,
-                email = authUser.email,
+                email = authUser.email.orEmpty(),
                 displayName = authUser.displayName,
-                avatarUrl = authUser.avatarUrl
+                avatarUrl = authUser.photoUrl?.toString()
             )
         }
         return liveRepo.startStream(host, title).onFailure {
@@ -806,7 +787,6 @@ class VyoraAppViewModel(
             _toastMessage.value = "Insufficient balance"
             return
         }
-        val pointsNeeded = (amountUsd / settings.pointValueUsd.coerceAtLeast(0.0001)).toLong().coerceAtLeast(1L)
         viewModelScope.launch {
             backendRepo.submitWithdrawalServer(amountUsd, method, accountDetails)
                 .onSuccess {

@@ -7,11 +7,19 @@ import android.graphics.Matrix
 import android.media.ExifInterface
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.util.Log
 import com.example.earn.EarnLogic
+import com.google.firebase.Firebase
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.storage.FirebaseStorage
+import com.google.firebase.storage.StorageMetadata
+import com.google.firebase.storage.storage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -30,17 +38,25 @@ sealed interface UploadStatus {
 
 class StorageMediaRepository(
     private val appContext: Context,
-    private val supabase: SupabaseClient = SupabaseClient.getInstance(appContext)
+    private val storage: FirebaseStorage = Firebase.storage,
+    private val auth: FirebaseAuth = FirebaseAuth.getInstance()
 ) {
     fun uploadVideoWithThumbnail(
         context: Context,
         userId: String,
         videoUri: Uri,
         customCoverUri: Uri? = null
-    ): Flow<UploadStatus> = flow {
-        val ownerUid = resolveOwnerUid(userId)
+    ): Flow<UploadStatus> = callbackFlow {
+        val ownerUid = try {
+            resolveOwnerUid(userId)
+        } catch (e: Exception) {
+            trySend(UploadStatus.Failed(e.localizedMessage ?: "يرجى تسجيل الدخول أولاً"))
+            close()
+            return@callbackFlow
+        }
+
         val fileId = UUID.randomUUID().toString()
-        emit(UploadStatus.Progress(10))
+        trySend(UploadStatus.Progress(5))
 
         val (contentHash, measuredSize) = withContext(Dispatchers.IO) {
             runCatching {
@@ -50,58 +66,84 @@ class StorageMediaRepository(
             }.getOrNull() ?: ("" to -1L)
         }
         if (measuredSize <= 0L) {
-            emit(UploadStatus.Failed("Unable to read selected video file"))
-            return@flow
+            trySend(UploadStatus.Failed("تعذر قراءة ملف الفيديو المختار"))
+            close()
+            return@callbackFlow
         }
 
-        emit(UploadStatus.Progress(35))
-        val videoUrl = try {
-            supabase.uploadStorageStream(
-                objectPath = "videos/$ownerUid/$fileId.mp4",
-                contentLength = measuredSize,
-                contentType = context.contentResolver.getType(videoUri) ?: "video/mp4",
-                openStream = { context.contentResolver.openInputStream(videoUri) }
+        val contentType = context.contentResolver.getType(videoUri) ?: "video/mp4"
+        val videoRef = storage.reference.child("videos/$ownerUid/$fileId.mp4")
+        val metadata = StorageMetadata.Builder()
+            .setContentType(contentType)
+            .build()
+
+        var uploadTask = runCatching { videoRef.putFile(videoUri, metadata) }.getOrNull()
+        if (uploadTask == null) {
+            val stream = withContext(Dispatchers.IO) {
+                runCatching { context.contentResolver.openInputStream(videoUri) }.getOrNull()
+            }
+            if (stream == null) {
+                trySend(UploadStatus.Failed("تعذر فتح ملف الفيديو للرفع"))
+                close()
+                return@callbackFlow
+            }
+            uploadTask = videoRef.putStream(stream, metadata)
+        }
+
+        val listener = uploadTask.addOnProgressListener { snap ->
+            val total = snap.totalByteCount.takeIf { it > 0 } ?: measuredSize.coerceAtLeast(1L)
+            val pct = ((snap.bytesTransferred * 75L) / total).toInt().coerceIn(8, 82)
+            trySend(UploadStatus.Progress(pct))
+        }
+
+        try {
+            listener.await()
+            val videoUrl = videoRef.downloadUrl.await().toString()
+            trySend(UploadStatus.Progress(86))
+
+            val thumbBytes = withContext(Dispatchers.IO) {
+                if (customCoverUri != null) {
+                    readUriBytes(context, customCoverUri)?.let {
+                        encodeCompressedImageBytes(it, maxEdgePx = 720) ?: it
+                    }
+                } else {
+                    extractVideoFrameBytes(context, videoUri)
+                }
+            }
+
+            val thumbUrl = if (thumbBytes != null && thumbBytes.isNotEmpty()) {
+                runCatching {
+                    val thumbRef = storage.reference.child("thumbnails/$ownerUid/$fileId.jpg")
+                    val thumbMeta = StorageMetadata.Builder().setContentType("image/jpeg").build()
+                    thumbRef.putBytes(thumbBytes, thumbMeta).await()
+                    thumbRef.downloadUrl.await().toString()
+                }.getOrDefault("")
+            } else {
+                ""
+            }
+
+            trySend(UploadStatus.Progress(100))
+            trySend(
+                UploadStatus.Completed(
+                    downloadUrl = videoUrl,
+                    thumbnailUrl = thumbUrl,
+                    contentHash = contentHash,
+                    fileSizeBytes = measuredSize.coerceAtLeast(0L)
+                )
             )
+            close()
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            emit(
-                UploadStatus.Failed(
-                    e.localizedMessage ?: "Video upload failed (verify Supabase Storage bucket ${supabase.storageBucket} & RLS policies)"
-                )
-            )
-            return@flow
+            Log.e(TAG, "Video upload to Firebase Storage failed", e)
+            trySend(UploadStatus.Failed(friendlyStorageError(e)))
+            close()
         }
 
-        emit(UploadStatus.Progress(80))
-        val thumbBytes = withContext(Dispatchers.IO) {
-            if (customCoverUri != null) {
-                readUriBytes(context, customCoverUri)?.let { encodeCompressedImageBytes(it, maxEdgePx = 720) ?: it }
-            } else {
-                extractVideoFrameBytes(context, videoUri)
+        awaitClose {
+            if (!uploadTask.isComplete) {
+                uploadTask.cancel()
             }
         }
-
-        val thumbUrl = if (thumbBytes != null && thumbBytes.isNotEmpty()) {
-            runCatching {
-                supabase.uploadStorageObject(
-                    objectPath = "thumbnails/$ownerUid/$fileId.jpg",
-                    bytes = thumbBytes,
-                    contentType = "image/jpeg"
-                )
-            }.getOrDefault("")
-        } else {
-            ""
-        }
-
-        emit(UploadStatus.Progress(100))
-        emit(
-            UploadStatus.Completed(
-                downloadUrl = videoUrl,
-                thumbnailUrl = thumbUrl,
-                contentHash = contentHash,
-                fileSizeBytes = measuredSize.coerceAtLeast(0L)
-            )
-        )
     }
 
     suspend fun uploadImage(userId: String, folder: String, uri: Uri): Result<String> = withContext(Dispatchers.IO) {
@@ -117,11 +159,14 @@ class StorageMediaRepository(
             val isJpeg = compressedBytes != null && compressedBytes.isNotEmpty()
             val ext = if (isJpeg) "jpg" else guessExtensionFromUri(appContext, uri)
             val mime = if (isJpeg) "image/jpeg" else (appContext.contentResolver.getType(uri) ?: "image/jpeg")
-            supabase.uploadStorageObject(
-                objectPath = "$cleanFolder/$ownerUid/${UUID.randomUUID()}.$ext",
-                bytes = payload,
-                contentType = mime
-            )
+
+            val ref = storage.reference.child("$cleanFolder/$ownerUid/${UUID.randomUUID()}.$ext")
+            val meta = StorageMetadata.Builder().setContentType(mime).build()
+            ref.putBytes(payload, meta).await()
+            ref.downloadUrl.await().toString()
+        }.onFailure { err ->
+            if (err is CancellationException) throw err
+            Log.e(TAG, "Image upload failed in $folder", err)
         }
     }
 
@@ -146,16 +191,31 @@ class StorageMediaRepository(
                 "webp" -> "image/webp"
                 else -> "image/jpeg"
             }
-            supabase.uploadStorageObject(
-                objectPath = "$cleanFolder/$ownerUid/${UUID.randomUUID()}.$extension",
-                bytes = bytes,
-                contentType = mimeType
-            )
+            val ref = storage.reference.child("$cleanFolder/$ownerUid/${UUID.randomUUID()}.$extension")
+            val meta = StorageMetadata.Builder().setContentType(mimeType).build()
+            ref.putBytes(bytes, meta).await()
+            ref.downloadUrl.await().toString()
+        }.onFailure { err ->
+            if (err is CancellationException) throw err
+            Log.e(TAG, "Media upload failed in $folder", err)
+        }
+    }
+
+    private fun friendlyStorageError(err: Exception): String {
+        val raw = err.localizedMessage.orEmpty()
+        return if (raw.contains("404") || raw.contains("not found", ignoreCase = true) ||
+            raw.contains("Object does not exist", ignoreCase = true)
+        ) {
+            "فشل الرفع: تأكد من تفعيل Firebase Storage في لوحة تحكم Firebase ونشر قواعد storage.rules"
+        } else if (raw.contains("403") || raw.contains("permission", ignoreCase = true)) {
+            "صلاحيات التخزين مرفوضة: تأكد من نشر storage.rules وتسجيل الدخول بحساب جوجل"
+        } else {
+            raw.ifBlank { "تعذر رفع الملف إلى Firebase Storage" }
         }
     }
 
     private fun resolveOwnerUid(fallbackUserId: String): String =
-        supabase.currentUser?.uid?.takeIf { it.isNotBlank() }
+        auth.currentUser?.uid?.takeIf { it.isNotBlank() }
             ?: fallbackUserId.trim().takeIf { it.isNotBlank() }
             ?: throw IllegalStateException("User must be signed in.")
 
@@ -197,6 +257,8 @@ class StorageMediaRepository(
     }
 
     companion object {
+        private const val TAG = "StorageMediaRepo"
+
         fun encodeCompressedImageBytes(rawBytes: ByteArray, maxEdgePx: Int = 720): ByteArray? {
             if (rawBytes.isEmpty()) return null
             return try {

@@ -1,6 +1,7 @@
 package com.example.data.repository
 
 import android.content.Context
+import com.example.R
 import com.example.data.model.AdminRole
 import com.example.data.model.AdminSettings
 import com.example.data.model.LiveStream
@@ -10,87 +11,99 @@ import com.example.data.model.VideoPost
 import com.example.data.model.Wallet
 import com.example.data.model.WalletTransaction
 import com.example.data.model.WithdrawalRequest
-import com.example.data.remote.SupabaseClient
-import com.example.data.remote.toAdminRole
-import com.example.data.remote.toAdminSettings
-import com.example.data.remote.toLiveStream
-import com.example.data.remote.toModerationReport
-import com.example.data.remote.toObjectList
-import com.example.data.remote.toUserProfile
-import com.example.data.remote.toVideoPost
-import com.example.data.remote.toWallet
-import com.example.data.remote.toWalletTransaction
-import com.example.data.remote.toWithdrawalRequest
+import com.example.data.remote.FirestoreErrorHandler
+import com.example.data.remote.OperationType
+import com.google.firebase.Timestamp
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
-import org.json.JSONObject
+import kotlinx.coroutines.tasks.await
 import java.util.UUID
 
 class WalletAdminRepository(
-    private val supabase: SupabaseClient
+    private val db: FirebaseFirestore,
+    private val auth: FirebaseAuth = FirebaseAuth.getInstance()
 ) {
-    constructor(context: Context) : this(SupabaseClient.getInstance(context))
+    constructor(context: Context) : this(
+        db = FirebaseFirestore.getInstance(context.applicationContext.getString(R.string.firestore_database_id)),
+        auth = FirebaseAuth.getInstance()
+    )
 
     private fun requireUid(): String =
-        supabase.currentUser?.uid ?: throw IllegalStateException("User must be signed in.")
+        auth.currentUser?.uid ?: throw IllegalStateException("User must be signed in.")
 
     fun observeWallet(userId: String): Flow<Wallet?> =
-        supabase.observeTopic("wallet").map {
-            runCatching {
-                val arr = supabase.select(
-                    "vyora_wallets",
-                    "user_id=eq.${SupabaseClient.urlEncode(userId)}&limit=1"
-                )
-                arr.toObjectList().firstOrNull()?.toWallet()
-            }.getOrNull()
-        }
+        db.collection("wallets").document(userId)
+            .snapshots()
+            .map { snap ->
+                if (!snap.exists()) null
+                else snap.toObject(Wallet::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+            }
+            .catch { err ->
+                if (err is CancellationException) throw err
+                FirestoreErrorHandler.handleFirestoreError(err as Exception, OperationType.GET, "wallets/$userId", auth)
+                emit(null)
+            }
 
     fun observeTransactions(userId: String): Flow<List<WalletTransaction>> =
-        supabase.observeTopic("wallet").map {
-            runCatching {
-                val arr = supabase.select(
-                    "vyora_wallet_transactions",
-                    "user_id=eq.${SupabaseClient.urlEncode(userId)}&order=created_at.desc"
-                )
-                arr.toObjectList().map { it.toWalletTransaction() }
-            }.getOrDefault(emptyList())
-        }
+        db.collection("wallets").document(userId).collection("transactions")
+            .snapshots()
+            .map { snap ->
+                snap.documents.mapNotNull { doc ->
+                    doc.toObject(WalletTransaction::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                }.sortedByDescending { it.createdAt ?: Timestamp(0, 0) }
+            }
+            .catch { err ->
+                if (err is CancellationException) throw err
+                FirestoreErrorHandler.handleFirestoreError(err as Exception, OperationType.LIST, "wallets/$userId/transactions", auth)
+                emit(emptyList())
+            }
 
     fun observeMyWithdrawals(userId: String): Flow<List<WithdrawalRequest>> =
-        supabase.observeTopic("withdrawals").map {
-            runCatching {
-                val arr = supabase.select(
-                    "vyora_withdrawal_requests",
-                    "user_id=eq.${SupabaseClient.urlEncode(userId)}&order=created_at.desc"
-                )
-                arr.toObjectList().map { it.toWithdrawalRequest() }
-            }.getOrDefault(emptyList())
-        }
+        db.collection("withdrawals")
+            .whereEqualTo("userId", userId)
+            .snapshots()
+            .map { snap ->
+                snap.documents.mapNotNull { doc ->
+                    doc.toObject(WithdrawalRequest::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                }.sortedByDescending { it.createdAt ?: Timestamp(0, 0) }
+            }
+            .catch { err ->
+                if (err is CancellationException) throw err
+                FirestoreErrorHandler.handleFirestoreError(err as Exception, OperationType.LIST, "withdrawals", auth)
+                emit(emptyList())
+            }
 
     fun observeAdminSettings(): Flow<AdminSettings> =
-        supabase.observeTopic("admin_settings").map {
-            runCatching {
-                val arr = supabase.select(
-                    "vyora_admin_settings",
-                    "id=eq.global&limit=1"
-                )
-                arr.toObjectList().firstOrNull()?.toAdminSettings() ?: AdminSettings(id = "global")
-            }.getOrDefault(AdminSettings(id = "global"))
-        }
+        db.collection("admin_settings").document("global")
+            .snapshots()
+            .map { snap ->
+                if (!snap.exists()) AdminSettings(id = "global")
+                else snap.toObject(AdminSettings::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                    ?: AdminSettings(id = "global")
+            }
+            .catch { err ->
+                if (err is CancellationException) throw err
+                FirestoreErrorHandler.handleFirestoreError(err as Exception, OperationType.GET, "admin_settings/global", auth)
+                emit(AdminSettings(id = "global"))
+            }
 
     suspend fun checkIsAdmin(uid: String, email: String?): Boolean {
-        if (email.equals("mahmoudomran324@gmail.com", ignoreCase = true) &&
-            supabase.currentUser?.isEmailVerified == true
-        ) {
-            return true
-        }
-        return runCatching {
-            val arr = supabase.select(
-                "vyora_admin_roles",
-                "select=user_id&user_id=eq.${SupabaseClient.urlEncode(uid)}&limit=1"
+        val verified = auth.currentUser?.isEmailVerified == true
+        val isPrimaryAdmin = verified && (
+            email.equals("mahmoudomran324@gmail.com", ignoreCase = true) ||
+                email.equals("omranyehya210@gmail.com", ignoreCase = true)
             )
-            arr.length() > 0
+        if (isPrimaryAdmin) return true
+
+        return runCatching {
+            db.collection("admins").document(uid).get().await().exists()
         }.getOrDefault(false)
     }
 
@@ -101,158 +114,164 @@ class WalletAdminRepository(
         details: String
     ): Result<Unit> = runCatching {
         val uid = requireUid()
-        supabase.insert(
-            "vyora_reports",
-            JSONObject().apply {
-                put("id", UUID.randomUUID().toString().replace("-", ""))
-                put("reporter_id", uid)
-                put("target_type", targetType)
-                put("target_id", targetId)
-                put("reason", reason.take(120))
-                put("details", details.take(1000))
-                put("status", "pending")
-            }
-        )
-        supabase.notifyChange("reports")
+        val reportId = UUID.randomUUID().toString().replace("-", "")
+        db.collection("reports").document(reportId).set(
+            mapOf(
+                "reporterId" to uid,
+                "targetType" to targetType.trim().take(40),
+                "targetId" to targetId.trim().take(128),
+                "reason" to reason.trim().take(150),
+                "details" to details.trim().take(1000),
+                "status" to "pending",
+                "reviewedBy" to "",
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        ).await()
         Unit
-    }.onFailure { if (it is CancellationException) throw it }
+    }.onFailure { err ->
+        if (err is CancellationException) throw err
+        FirestoreErrorHandler.handleFirestoreError(err as Exception, OperationType.CREATE, "reports", auth)
+    }
 
-    suspend fun submitWithdrawalRequest(
-        amountUsd: Double,
-        pointsSpent: Long,
-        method: String,
-        accountDetails: String
-    ): Result<Unit> = runCatching {
-        requireUid()
-        require(amountUsd > 0.0 && pointsSpent > 0L)
-        supabase.rpc(
-            "vyora_request_withdrawal",
-            JSONObject().apply {
-                put("p_amount_usd", amountUsd)
-                put("p_method", method.take(60))
-                put("p_account_details", accountDetails.take(200))
-            }
-        )
-        supabase.notifyChange("withdrawals", "wallet")
-        Unit
-    }.onFailure { if (it is CancellationException) throw it }
-
-    // --- Admin Dashboard Operations ---
     fun observeAllUsersAdmin(): Flow<List<UserProfile>> =
-        supabase.observeTopic("profiles").map {
-            runCatching {
-                val arr = supabase.select("vyora_profiles", "order=created_at.desc&limit=100")
-                arr.toObjectList().map { it.toUserProfile() }
-            }.getOrDefault(emptyList())
-        }
+        db.collection("profiles")
+            .limit(100)
+            .snapshots()
+            .map { snap ->
+                snap.documents.mapNotNull { doc ->
+                    doc.toObject(UserProfile::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                }.sortedByDescending { it.createdAt ?: Timestamp(0, 0) }
+            }
+            .catch { err ->
+                if (err is CancellationException) throw err
+                FirestoreErrorHandler.handleFirestoreError(err as Exception, OperationType.LIST, "profiles", auth)
+                emit(emptyList())
+            }
 
     fun observeAllVideosAdmin(): Flow<List<VideoPost>> =
-        supabase.observeTopic("videos").map {
-            runCatching {
-                val arr = supabase.select("vyora_videos_ledger", "order=created_at.desc&limit=100")
-                arr.toObjectList().map { it.toVideoPost() }
-            }.getOrDefault(emptyList())
-        }
+        db.collection("videos")
+            .limit(100)
+            .snapshots()
+            .map { snap ->
+                snap.documents.mapNotNull { doc ->
+                    doc.toObject(VideoPost::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                }.sortedByDescending { it.createdAt ?: Timestamp(0, 0) }
+            }
+            .catch { err ->
+                if (err is CancellationException) throw err
+                FirestoreErrorHandler.handleFirestoreError(err as Exception, OperationType.LIST, "videos", auth)
+                emit(emptyList())
+            }
 
     fun observeReportsAdmin(): Flow<List<ModerationReport>> =
-        supabase.observeTopic("reports").map {
-            runCatching {
-                val arr = supabase.select("vyora_reports", "order=created_at.desc&limit=100")
-                arr.toObjectList().map { it.toModerationReport() }
-            }.getOrDefault(emptyList())
-        }
+        db.collection("reports")
+            .limit(100)
+            .snapshots()
+            .map { snap ->
+                snap.documents.mapNotNull { doc ->
+                    doc.toObject(ModerationReport::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                }.sortedByDescending { it.createdAt ?: Timestamp(0, 0) }
+            }
+            .catch { err ->
+                if (err is CancellationException) throw err
+                FirestoreErrorHandler.handleFirestoreError(err as Exception, OperationType.LIST, "reports", auth)
+                emit(emptyList())
+            }
 
     fun observeWithdrawalsAdmin(): Flow<List<WithdrawalRequest>> =
-        supabase.observeTopic("withdrawals").map {
-            runCatching {
-                val arr = supabase.select("vyora_withdrawal_requests", "order=created_at.desc&limit=100")
-                arr.toObjectList().map { it.toWithdrawalRequest() }
-            }.getOrDefault(emptyList())
-        }
+        db.collection("withdrawals")
+            .limit(100)
+            .snapshots()
+            .map { snap ->
+                snap.documents.mapNotNull { doc ->
+                    doc.toObject(WithdrawalRequest::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                }.sortedByDescending { it.createdAt ?: Timestamp(0, 0) }
+            }
+            .catch { err ->
+                if (err is CancellationException) throw err
+                FirestoreErrorHandler.handleFirestoreError(err as Exception, OperationType.LIST, "withdrawals", auth)
+                emit(emptyList())
+            }
 
     fun observeAdmins(): Flow<List<AdminRole>> =
-        supabase.observeTopic("admins").map {
-            runCatching {
-                val arr = supabase.select("vyora_admin_roles", "order=created_at.desc")
-                arr.toObjectList().map { it.toAdminRole() }
-            }.getOrDefault(emptyList())
-        }
+        db.collection("admins")
+            .snapshots()
+            .map { snap ->
+                snap.documents.mapNotNull { doc ->
+                    doc.toObject(AdminRole::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                }.sortedByDescending { it.createdAt ?: Timestamp(0, 0) }
+            }
+            .catch { err ->
+                if (err is CancellationException) throw err
+                FirestoreErrorHandler.handleFirestoreError(err as Exception, OperationType.LIST, "admins", auth)
+                emit(emptyList())
+            }
 
     fun observeLiveStreamsAdmin(): Flow<List<LiveStream>> =
-        supabase.observeTopic("live").map {
-            runCatching {
-                val arr = supabase.select("vyora_live_streams", "order=started_at.desc&limit=50")
-                arr.toObjectList().map { it.toLiveStream() }
-            }.getOrDefault(emptyList())
-        }
+        db.collection("live_streams")
+            .limit(50)
+            .snapshots()
+            .map { snap ->
+                snap.documents.mapNotNull { doc ->
+                    doc.toObject(LiveStream::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                }.sortedByDescending { it.startedAt ?: Timestamp(0, 0) }
+            }
+            .catch { err ->
+                if (err is CancellationException) throw err
+                FirestoreErrorHandler.handleFirestoreError(err as Exception, OperationType.LIST, "live_streams", auth)
+                emit(emptyList())
+            }
 
     suspend fun setUserBanned(targetUid: String, banned: Boolean): Result<Unit> = runCatching {
         requireUid()
-        supabase.update(
-            "vyora_profiles",
-            "user_id=eq.${SupabaseClient.urlEncode(targetUid)}",
-            JSONObject().put("is_banned", banned)
-        )
-        supabase.notifyChange("profiles")
+        db.collection("profiles").document(targetUid)
+            .update(
+                mapOf(
+                    "isBanned" to banned,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            .await()
         Unit
-    }.onFailure { if (it is CancellationException) throw it }
+    }.onFailure { err ->
+        if (err is CancellationException) throw err
+        FirestoreErrorHandler.handleFirestoreError(err as Exception, OperationType.UPDATE, "profiles/$targetUid", auth)
+    }
 
     suspend fun removeVideoAdmin(videoId: String): Result<Unit> = runCatching {
         requireUid()
-        supabase.update(
-            "vyora_videos_ledger",
-            "video_id=eq.${SupabaseClient.urlEncode(videoId)}",
-            JSONObject().put("status", "removed")
-        )
-        supabase.notifyChange("videos")
+        db.collection("videos").document(videoId)
+            .update(
+                mapOf(
+                    "status" to "removed",
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            .await()
         Unit
-    }.onFailure { if (it is CancellationException) throw it }
+    }.onFailure { err ->
+        if (err is CancellationException) throw err
+        FirestoreErrorHandler.handleFirestoreError(err as Exception, OperationType.UPDATE, "videos/$videoId", auth)
+    }
 
     suspend fun updateReportStatus(reportId: String, status: String): Result<Unit> = runCatching {
         val adminUid = requireUid()
-        supabase.update(
-            "vyora_reports",
-            "id=eq.${SupabaseClient.urlEncode(reportId)}",
-            JSONObject().apply {
-                put("status", status)
-                put("reviewed_by", adminUid)
-            }
-        )
-        supabase.notifyChange("reports")
+        val resolvedStatus = if (status in listOf("approved", "dismissed")) status else "dismissed"
+        db.collection("reports").document(reportId)
+            .update(
+                mapOf(
+                    "status" to resolvedStatus,
+                    "reviewedBy" to adminUid,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            .await()
         Unit
-    }.onFailure { if (it is CancellationException) throw it }
-
-    suspend fun grantCreatorPointsAdmin(
-        targetUid: String,
-        pointsDelta: Long,
-        pointValueUsd: Double,
-        reason: String
-    ): Result<Unit> = runCatching {
-        requireUid()
-        supabase.rpc(
-            "vyora_admin_grant_points",
-            JSONObject().apply {
-                put("p_target_uid", targetUid)
-                put("p_points_delta", pointsDelta)
-                put("p_reason", reason.take(200))
-            }
-        )
-        supabase.notifyChange("wallet")
-        Unit
-    }.onFailure { if (it is CancellationException) throw it }
-
-    suspend fun reviewWithdrawalAdmin(request: WithdrawalRequest, approve: Boolean): Result<Unit> = runCatching {
-        requireUid()
-        supabase.rpc(
-            "vyora_admin_review_withdrawal",
-            JSONObject().apply {
-                put("p_request_id", request.id)
-                put("p_approve", approve)
-            }
-        )
-        supabase.notifyChange("withdrawals", "wallet")
-        Unit
-    }.onFailure { if (it is CancellationException) throw it }
+    }.onFailure { err ->
+        if (err is CancellationException) throw err
+        FirestoreErrorHandler.handleFirestoreError(err as Exception, OperationType.UPDATE, "reports/$reportId", auth)
+    }
 
     suspend fun saveAdminSettings(
         pointValueUsd: Double,
@@ -261,25 +280,30 @@ class WalletAdminRepository(
         maxVideoDurationSec: Long
     ): Result<Unit> = runCatching {
         val adminUid = requireUid()
-        val payload = JSONObject().apply {
-            put("point_value_usd", pointValueUsd.coerceAtLeast(0.0001))
-            put("min_withdrawal_usd", minWithdrawalUsd.coerceAtLeast(1.0))
-            put("rewards_enabled", rewardsEnabled)
-            put("max_video_duration_sec", maxVideoDurationSec.coerceIn(15L, 300L))
-            put("updated_by", adminUid)
-        }
-        val updated = supabase.update("vyora_admin_settings", "id=eq.global", payload)
-        if (updated.length() == 0) {
-            supabase.insert(
-                "vyora_admin_settings",
-                JSONObject(payload.toString()).put("id", "global"),
-                upsert = true,
-                onConflict = "id"
+        val settingsRef = db.collection("admin_settings").document("global")
+        val current = runCatching {
+            settingsRef.get().await().toObject(AdminSettings::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+        }.getOrNull() ?: AdminSettings(id = "global")
+
+        settingsRef.set(
+            mapOf(
+                "pointValueUsd" to pointValueUsd.coerceAtLeast(0.0001),
+                "minWithdrawalUsd" to minWithdrawalUsd.coerceAtLeast(1.0),
+                "rewardsEnabled" to rewardsEnabled,
+                "maxVideoDurationSec" to maxVideoDurationSec.coerceIn(15L, 300L),
+                "watchWheelEnabled" to current.watchWheelEnabled,
+                "watchWheelCycleSec" to current.watchWheelCycleSec.coerceIn(10L, 180L),
+                "watchWheelPointsPerCycle" to current.watchWheelPointsPerCycle.coerceIn(1L, 500L),
+                "watchWheelDailyCapCycles" to current.watchWheelDailyCapCycles.coerceIn(1L, 500L),
+                "updatedBy" to adminUid,
+                "updatedAt" to FieldValue.serverTimestamp()
             )
-        }
-        supabase.notifyChange("admin_settings")
+        ).await()
         Unit
-    }.onFailure { if (it is CancellationException) throw it }
+    }.onFailure { err ->
+        if (err is CancellationException) throw err
+        FirestoreErrorHandler.handleFirestoreError(err as Exception, OperationType.WRITE, "admin_settings/global", auth)
+    }
 
     suspend fun updateWatchWheelSettings(
         enabled: Boolean,
@@ -288,63 +312,54 @@ class WalletAdminRepository(
         dailyCapCycles: Long
     ): Result<Unit> = runCatching {
         val adminUid = requireUid()
-        val cleanCycle = cycleSec.coerceIn(10L, 180L)
-        val cleanPoints = pointsPerCycle.coerceIn(1L, 500L)
-        val cleanCap = dailyCapCycles.coerceIn(1L, 500L)
-        val rpcDone = runCatching {
-            supabase.rpc(
-                "vyora_admin_update_watch_wheel",
-                JSONObject().apply {
-                    put("p_enabled", enabled)
-                    put("p_cycle_sec", cleanCycle)
-                    put("p_points_per_cycle", cleanPoints)
-                    put("p_daily_cap_cycles", cleanCap)
-                }
+        val settingsRef = db.collection("admin_settings").document("global")
+        val current = runCatching {
+            settingsRef.get().await().toObject(AdminSettings::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+        }.getOrNull() ?: AdminSettings(id = "global")
+
+        settingsRef.set(
+            mapOf(
+                "pointValueUsd" to current.pointValueUsd.coerceAtLeast(0.0001),
+                "minWithdrawalUsd" to current.minWithdrawalUsd.coerceAtLeast(1.0),
+                "rewardsEnabled" to current.rewardsEnabled,
+                "maxVideoDurationSec" to current.maxVideoDurationSec.coerceIn(15L, 300L),
+                "watchWheelEnabled" to enabled,
+                "watchWheelCycleSec" to cycleSec.coerceIn(10L, 180L),
+                "watchWheelPointsPerCycle" to pointsPerCycle.coerceIn(1L, 500L),
+                "watchWheelDailyCapCycles" to dailyCapCycles.coerceIn(1L, 500L),
+                "updatedBy" to adminUid,
+                "updatedAt" to FieldValue.serverTimestamp()
             )
-        }.isSuccess
-        if (!rpcDone) {
-            val payload = JSONObject().apply {
-                put("watch_wheel_enabled", enabled)
-                put("watch_wheel_cycle_sec", cleanCycle)
-                put("watch_wheel_points_per_cycle", cleanPoints)
-                put("watch_wheel_daily_cap_cycles", cleanCap)
-                put("updated_by", adminUid)
-            }
-            val updated = supabase.update("vyora_admin_settings", "id=eq.global", payload)
-            if (updated.length() == 0) {
-                supabase.insert(
-                    "vyora_admin_settings",
-                    JSONObject(payload.toString()).put("id", "global"),
-                    upsert = true,
-                    onConflict = "id"
-                )
-            }
-        }
-        supabase.notifyChange("admin_settings")
+        ).await()
         Unit
-    }.onFailure { if (it is CancellationException) throw it }
+    }.onFailure { err ->
+        if (err is CancellationException) throw err
+        FirestoreErrorHandler.handleFirestoreError(err as Exception, OperationType.WRITE, "admin_settings/global", auth)
+    }
 
     suspend fun assignAdminRole(targetUid: String, email: String, role: String): Result<Unit> = runCatching {
         val adminUid = requireUid()
-        supabase.insert(
-            "vyora_admin_roles",
-            JSONObject().apply {
-                put("user_id", targetUid)
-                put("email", email.trim().take(200))
-                put("role", role)
-                put("assigned_by", adminUid)
-            },
-            upsert = true,
-            onConflict = "user_id"
-        )
-        supabase.notifyChange("admins")
+        db.collection("admins").document(targetUid).set(
+            mapOf(
+                "userId" to targetUid,
+                "email" to email.trim().take(200),
+                "role" to role.ifBlank { "moderator" }.take(40),
+                "assignedBy" to adminUid,
+                "createdAt" to FieldValue.serverTimestamp()
+            )
+        ).await()
         Unit
-    }.onFailure { if (it is CancellationException) throw it }
+    }.onFailure { err ->
+        if (err is CancellationException) throw err
+        FirestoreErrorHandler.handleFirestoreError(err as Exception, OperationType.WRITE, "admins/$targetUid", auth)
+    }
 
     suspend fun removeAdminRole(targetUid: String): Result<Unit> = runCatching {
         requireUid()
-        supabase.delete("vyora_admin_roles", "user_id=eq.${SupabaseClient.urlEncode(targetUid)}")
-        supabase.notifyChange("admins")
+        db.collection("admins").document(targetUid).delete().await()
         Unit
-    }.onFailure { if (it is CancellationException) throw it }
+    }.onFailure { err ->
+        if (err is CancellationException) throw err
+        FirestoreErrorHandler.handleFirestoreError(err as Exception, OperationType.DELETE, "admins/$targetUid", auth)
+    }
 }

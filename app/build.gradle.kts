@@ -5,6 +5,7 @@ plugins {
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.google.devtools.ksp)
   alias(libs.plugins.secrets)
+  alias(libs.plugins.google.services)
 }
 
 android {
@@ -104,10 +105,17 @@ dependencies {
   implementation(libs.coil.compose)
   // implementation(libs.converter.moshi)
 
-  // Optional Google ID sign-in via Credential Manager (exchanged with Supabase Auth):
+  // Google ID sign-in via Credential Manager (exchanged with Firebase Auth):
   implementation(libs.androidx.credentials)
   implementation(libs.androidx.credentials.play.services)
   implementation(libs.googleid)
+
+  // Firebase (Auth, Firestore, Storage)
+  implementation(platform(libs.firebase.bom))
+  implementation(libs.firebase.auth)
+  implementation(libs.firebase.firestore)
+  implementation(libs.firebase.storage)
+  implementation(libs.kotlinx.coroutines.play.services)
 
   // Media3 ExoPlayer for progressive video streaming & preloading
   implementation(libs.androidx.media3.exoplayer)
@@ -125,7 +133,7 @@ dependencies {
   implementation(libs.kotlinx.coroutines.core)
   // implementation(libs.logging.interceptor)
   // implementation(libs.moshi.kotlin)
-  implementation(libs.okhttp)
+  // implementation(libs.okhttp)
   // implementation(libs.play.services.location)
   // implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)

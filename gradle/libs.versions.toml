@@ -42,6 +42,8 @@ media3 = "1.11.1"
 agoraRtc = "4.7.0"
 playServicesAppset = "16.1.0"
 playIntegrity = "1.6.0"
+googleServices = "4.4.2"
+firebaseBom = "34.1.0"
 
 
 [libraries]
@@ -97,6 +99,11 @@ androidx-media3-common = { group = "androidx.media3", name = "media3-common", ve
 agora-rtc = { group = "io.agora.rtc", name = "full-sdk", version.ref = "agoraRtc" }
 play-services-appset = { group = "com.google.android.gms", name = "play-services-appset", version.ref = "playServicesAppset" }
 play-integrity = { group = "com.google.android.play", name = "integrity", version.ref = "playIntegrity" }
+firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
+firebase-firestore = { group = "com.google.firebase", name = "firebase-firestore" }
+firebase-auth = { group = "com.google.firebase", name = "firebase-auth" }
+firebase-storage = { group = "com.google.firebase", name = "firebase-storage" }
+kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "kotlinxCoroutinesCore" }
 
 
 [plugins]
@@ -104,3 +111,4 @@ android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 google-devtools-ksp = { id = "com.google.devtools.ksp", version.ref = "googleDevtoolsKsp" }
 secrets = { id = "com.google.android.libraries.mapsplatform.secrets-gradle-plugin", version.ref = "secretsGradlePlugin" }
+google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }

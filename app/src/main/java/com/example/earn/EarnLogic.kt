@@ -1,5 +1,6 @@
 package com.example.earn
 
+import android.net.Uri
 import java.io.InputStream
 import java.security.MessageDigest
 import java.time.Instant
@@ -9,7 +10,7 @@ import kotlin.math.min
 
 /**
  * Pure deterministic domain rules for VYORA "Earn With Us" (اربح معنا) program.
- * All date calculations use Egypt time (Africa/Cairo) so daily thresholds align with server SQL.
+ * All date calculations use Egypt time (Africa/Cairo) so daily thresholds stay consistent across devices.
  */
 object EarnLogic {
     val CAIRO_ZONE: ZoneId = ZoneId.of("Africa/Cairo")
@@ -28,10 +29,42 @@ object EarnLogic {
         return clean.length in 5..16
     }
 
-    /**
-     * Checks whether a single Cairo calendar day qualifies:
-     * >= requiredMinutes active usage AND >= requiredVideos valid non-duplicate active videos.
-     */
+    fun buildReferralInviteUri(code: String): String {
+        val clean = sanitizeReferralCode(code)
+        return "https://vyora.app/invite?ref=$clean"
+    }
+
+    fun buildCustomSchemeInviteUri(code: String): String {
+        val clean = sanitizeReferralCode(code)
+        return "vyora://invite?ref=$clean"
+    }
+
+    fun extractReferralCodeFromUri(uri: Uri?): String {
+        if (uri == null) return ""
+        val scheme = uri.scheme?.lowercase().orEmpty()
+        val host = uri.host?.lowercase().orEmpty()
+        val path = uri.path.orEmpty()
+        val isInviteUri = (scheme == "vyora" && host == "invite") ||
+            ((scheme == "https" || scheme == "http") &&
+                (host == "vyora.app" || host == "www.vyora.app") &&
+                path.startsWith("/invite"))
+        if (!isInviteUri) return ""
+
+        val queryCandidate = uri.getQueryParameter("ref")
+            ?: uri.getQueryParameter("code")
+        if (!queryCandidate.isNullOrBlank()) {
+            val clean = sanitizeReferralCode(queryCandidate)
+            if (isValidReferralCodeFormat(clean)) return clean
+        }
+
+        val lastSegment = uri.pathSegments.lastOrNull()?.takeIf { !it.equals("invite", ignoreCase = true) }
+        if (!lastSegment.isNullOrBlank()) {
+            val clean = sanitizeReferralCode(lastSegment)
+            if (isValidReferralCodeFormat(clean)) return clean
+        }
+        return ""
+    }
+
     fun doesDayQualify(
         activeSeconds: Long,
         validVideosCount: Int,
@@ -39,10 +72,6 @@ object EarnLogic {
         requiredVideos: Int = 2
     ): Boolean = activeSeconds >= requiredMinutes * 60L && validVideosCount >= requiredVideos
 
-    /**
-     * Computes consecutive qualifying Cairo days streak ending today (or yesterday if today is not yet completed).
-     * Missed days strictly break the streak — no missed day can be compensated or backfilled.
-     */
     fun calculateConsecutiveStreak(
         qualifyingDates: Set<LocalDate>,
         today: LocalDate = cairoToday()
@@ -61,10 +90,6 @@ object EarnLogic {
         return streak
     }
 
-    /**
-     * Weighted overall completion percentage (0..100):
-     * 25% personal videos (X/10) + 75% fully completed invited friends (X/10).
-     */
     fun calculateOverallProgressPercent(
         personalVideosCount: Int,
         requiredPersonalVideos: Int,
@@ -76,10 +101,6 @@ object EarnLogic {
         return ((vRatio * 0.25 + fRatio * 0.75) * 100.0).toInt().coerceIn(0, 100)
     }
 
-    /**
-     * Validates a candidate friend account for referral attribution without banning shared family phones blindly:
-     * Returns whether link can be auto-credited vs flagged for admin review.
-     */
     fun evaluateReferralDeviceSafety(
         inviterUid: String,
         friendUid: String,
@@ -123,9 +144,6 @@ object EarnLogic {
         )
     }
 
-    /**
-     * Computes SHA-256 content hash and total size from an InputStream in constant memory.
-     */
     fun computeStreamSha256AndSize(stream: InputStream): Pair<String, Long> {
         val digest = MessageDigest.getInstance("SHA-256")
         val buffer = ByteArray(16 * 1024)
@@ -142,9 +160,11 @@ object EarnLogic {
         return hex to total
     }
 
-    /**
-     * Builds the idempotent wallet transaction reference for Earn With Us reward payout.
-     */
+    fun stableSha256Id(input: String, length: Int = 32): String {
+        val bytes = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8))
+        return bytes.joinToString("") { "%02x".format(it) }.take(length)
+    }
+
     fun payoutTransactionRef(userId: String): String = "earn_reward:${userId.trim()}"
 }
 

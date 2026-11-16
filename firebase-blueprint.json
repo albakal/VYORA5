@@ -1,0 +1,548 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Public creator profile without PII (email is isolated in users/{userId}/private/info).",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "displayName": { "type": "string" },
+        "bio": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "isPrivate": { "type": "boolean" },
+        "isBanned": { "type": "boolean" },
+        "followersCount": { "type": "integer" },
+        "followingCount": { "type": "integer" },
+        "likesCount": { "type": "integer" },
+        "interests": { "type": "array" },
+        "language": { "type": "string", "enum": ["ar", "en"] },
+        "themeMode": { "type": "string", "enum": ["dark", "light", "system"] },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
+      },
+      "required": ["userId", "username", "isPrivate", "isBanned", "followersCount", "followingCount", "likesCount", "createdAt"]
+    },
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "Strictly isolated PII document for the user account.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "email", "createdAt"]
+    },
+    "FollowEdge": {
+      "title": "FollowEdge",
+      "description": "Directed follower/following edge stored under a user subcollection.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "username", "createdAt"]
+    },
+    "FollowRequest": {
+      "title": "FollowRequest",
+      "description": "Pending or resolved follow request for private accounts.",
+      "type": "object",
+      "properties": {
+        "requesterId": { "type": "string" },
+        "requesterUsername": { "type": "string" },
+        "requesterAvatarUrl": { "type": "string" },
+        "targetId": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["requesterId", "targetId", "status", "createdAt"]
+    },
+    "BlockedUser": {
+      "title": "BlockedUser",
+      "description": "User block record.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "targetId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "targetId", "createdAt"]
+    },
+    "BookmarkEdge": {
+      "title": "BookmarkEdge",
+      "description": "Saved video bookmark reference for a user.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "videoId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "videoId", "createdAt"]
+    },
+    "VideoPost": {
+      "title": "VideoPost",
+      "description": "Published short video metadata.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "creatorUsername": { "type": "string" },
+        "creatorAvatarUrl": { "type": "string" },
+        "videoUrl": { "type": "string" },
+        "thumbnailUrl": { "type": "string" },
+        "caption": { "type": "string" },
+        "hashtags": { "type": "array" },
+        "soundId": { "type": "string" },
+        "soundTitle": { "type": "string" },
+        "durationSec": { "type": "integer" },
+        "viewsCount": { "type": "integer" },
+        "likesCount": { "type": "integer" },
+        "commentsCount": { "type": "integer" },
+        "sharesCount": { "type": "integer" },
+        "bookmarksCount": { "type": "integer" },
+        "status": { "type": "string", "enum": ["active", "removed"] },
+        "contentHash": { "type": "string" },
+        "fileSizeBytes": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "creatorUsername", "videoUrl", "durationSec", "viewsCount", "likesCount", "commentsCount", "sharesCount", "bookmarksCount", "status", "createdAt"]
+    },
+    "VideoLike": {
+      "title": "VideoLike",
+      "description": "Like marker sub-document under a video.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "videoId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "videoId", "createdAt"]
+    },
+    "VideoComment": {
+      "title": "VideoComment",
+      "description": "Comment under a video.",
+      "type": "object",
+      "properties": {
+        "videoId": { "type": "string" },
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["videoId", "userId", "username", "text", "createdAt"]
+    },
+    "HashtagItem": {
+      "title": "HashtagItem",
+      "description": "Trending hashtag counter.",
+      "type": "object",
+      "properties": {
+        "tag": { "type": "string" },
+        "videosCount": { "type": "integer" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["tag", "videosCount", "updatedAt"]
+    },
+    "SoundTrack": {
+      "title": "SoundTrack",
+      "description": "Licensed sound track for video creation.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "artist": { "type": "string" },
+        "audioUrl": { "type": "string" },
+        "coverUrl": { "type": "string" },
+        "durationSec": { "type": "integer" },
+        "isLicensed": { "type": "boolean" },
+        "creatorId": { "type": "string" },
+        "usesCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "artist", "durationSec", "isLicensed", "creatorId", "usesCount", "createdAt"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "Direct 1-to-1 chat conversation.",
+      "type": "object",
+      "properties": {
+        "participantIds": { "type": "array" },
+        "lastMessage": { "type": "string" },
+        "lastMessageType": { "type": "string" },
+        "lastSenderId": { "type": "string" },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["participantIds", "lastSenderId", "createdAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Message inside a conversation.",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "participantIds": { "type": "array" },
+        "type": { "type": "string", "enum": ["text", "image", "video", "audio"] },
+        "text": { "type": "string" },
+        "mediaUrl": { "type": "string" },
+        "audioDurationMs": { "type": "integer" },
+        "readBy": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["senderId", "participantIds", "type", "readBy", "createdAt"]
+    },
+    "AppNotification": {
+      "title": "AppNotification",
+      "description": "User activity notification.",
+      "type": "object",
+      "properties": {
+        "recipientId": { "type": "string" },
+        "actorId": { "type": "string" },
+        "actorUsername": { "type": "string" },
+        "actorAvatarUrl": { "type": "string" },
+        "type": { "type": "string" },
+        "targetId": { "type": "string" },
+        "message": { "type": "string" },
+        "isRead": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["recipientId", "actorId", "type", "message", "isRead", "createdAt"]
+    },
+    "LiveStream": {
+      "title": "LiveStream",
+      "description": "Interactive live stream room.",
+      "type": "object",
+      "properties": {
+        "hostId": { "type": "string" },
+        "hostUsername": { "type": "string" },
+        "hostAvatarUrl": { "type": "string" },
+        "channelName": { "type": "string" },
+        "title": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "viewerCount": { "type": "integer" },
+        "likesCount": { "type": "integer" },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "endedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["hostId", "hostUsername", "channelName", "title", "isActive", "viewerCount", "likesCount", "startedAt"]
+    },
+    "LiveComment": {
+      "title": "LiveComment",
+      "description": "Live broadcast chat comment.",
+      "type": "object",
+      "properties": {
+        "streamId": { "type": "string" },
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["streamId", "userId", "username", "text", "createdAt"]
+    },
+    "ModerationReport": {
+      "title": "ModerationReport",
+      "description": "User moderation report.",
+      "type": "object",
+      "properties": {
+        "reporterId": { "type": "string" },
+        "targetType": { "type": "string" },
+        "targetId": { "type": "string" },
+        "reason": { "type": "string" },
+        "details": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "dismissed"] },
+        "reviewedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["reporterId", "targetType", "targetId", "reason", "status", "createdAt"]
+    },
+    "Wallet": {
+      "title": "Wallet",
+      "description": "Creator wallet balance and points.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "points": { "type": "integer" },
+        "balanceUsd": { "type": "number" },
+        "totalEarnedUsd": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "points", "balanceUsd", "totalEarnedUsd", "updatedAt"]
+    },
+    "WalletTransaction": {
+      "title": "WalletTransaction",
+      "description": "Append-only financial transaction ledger entry.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "type": { "type": "string" },
+        "pointsDelta": { "type": "integer" },
+        "amountDelta": { "type": "number" },
+        "description": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "type", "pointsDelta", "amountDelta", "status", "createdAt"]
+    },
+    "WithdrawalRequest": {
+      "title": "WithdrawalRequest",
+      "description": "Payout withdrawal request.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "amountUsd": { "type": "number" },
+        "pointsSpent": { "type": "integer" },
+        "method": { "type": "string" },
+        "accountDetails": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "reviewedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "amountUsd", "pointsSpent", "method", "accountDetails", "status", "createdAt"]
+    },
+    "AdminSettings": {
+      "title": "AdminSettings",
+      "description": "Global platform configuration including watch wheel controls.",
+      "type": "object",
+      "properties": {
+        "pointValueUsd": { "type": "number" },
+        "minWithdrawalUsd": { "type": "number" },
+        "rewardsEnabled": { "type": "boolean" },
+        "maxVideoDurationSec": { "type": "integer" },
+        "watchWheelEnabled": { "type": "boolean" },
+        "watchWheelCycleSec": { "type": "integer" },
+        "watchWheelPointsPerCycle": { "type": "integer" },
+        "watchWheelDailyCapCycles": { "type": "integer" },
+        "updatedBy": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["pointValueUsd", "minWithdrawalUsd", "rewardsEnabled", "maxVideoDurationSec", "watchWheelEnabled"]
+    },
+    "AdminRole": {
+      "title": "AdminRole",
+      "description": "Role-based access control document.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "assignedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "email", "role", "createdAt"]
+    },
+    "WatchWheelDaily": {
+      "title": "WatchWheelDaily",
+      "description": "Per-user daily watch wheel cycle counter.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "dateKey": { "type": "string" },
+        "cyclesUsed": { "type": "integer" },
+        "lastClaimedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "dateKey", "cyclesUsed", "lastClaimedAt"]
+    },
+    "EarnAccount": {
+      "title": "EarnAccount",
+      "description": "Earn With Us user progress, referral attribution, and daily Cairo streak state.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "displayName": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "referralCode": { "type": "string" },
+        "referredByCode": { "type": "string" },
+        "referredByUid": { "type": "string" },
+        "personalVideosCount": { "type": "integer" },
+        "invitedFriendsCount": { "type": "integer" },
+        "completedFriendsCount": { "type": "integer" },
+        "status": { "type": "string", "enum": ["in_progress", "under_review", "eligible", "approved", "rejected"] },
+        "reviewNote": { "type": "string" },
+        "isDeviceEligible": { "type": "boolean" },
+        "suspiciousFlag": { "type": "boolean" },
+        "suspiciousReason": { "type": "string" },
+        "deviceFingerprint": { "type": "string" },
+        "playIntegrityStatus": { "type": "string" },
+        "paidOutAt": { "type": "string" },
+        "myTodayDate": { "type": "string" },
+        "myTodaySeconds": { "type": "integer" },
+        "myTodayVideos": { "type": "integer" },
+        "myConsecutiveDays": { "type": "integer" },
+        "qualifyingDates": { "type": "array" },
+        "registeredAt": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "referralCode", "status", "isDeviceEligible", "suspiciousFlag", "updatedAt"]
+    },
+    "EarnReferralCodeMap": {
+      "title": "EarnReferralCodeMap",
+      "description": "Lookup document mapping a unique referral code to its owner.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "deviceFingerprint": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "userId", "createdAt"]
+    },
+    "EarnDevice": {
+      "title": "EarnDevice",
+      "description": "Anti-fraud device registry for multi-account prevention.",
+      "type": "object",
+      "properties": {
+        "deviceFingerprint": { "type": "string" },
+        "appSetId": { "type": "string" },
+        "playIntegrityStatus": { "type": "string" },
+        "firstUserId": { "type": "string" },
+        "linkedUserIds": { "type": "array" },
+        "isFlagged": { "type": "boolean" },
+        "flagReason": { "type": "string" },
+        "adminDecision": { "type": "string", "enum": ["pending", "approved_family", "blocked"] },
+        "adminNote": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["deviceFingerprint", "firstUserId", "linkedUserIds", "isFlagged", "adminDecision", "updatedAt"]
+    },
+    "EarnPayoutLog": {
+      "title": "EarnPayoutLog",
+      "description": "Admin decision log for Earn With Us payouts.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "rewardEgp": { "type": "number" },
+        "rewardPoints": { "type": "integer" },
+        "decision": { "type": "string" },
+        "note": { "type": "string" },
+        "reviewedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "rewardEgp", "rewardPoints", "decision", "reviewedBy", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/profiles/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Public user profiles."
+    },
+    "/users/{userId}/private/info": {
+      "schema": { "$ref": "#/entities/UserPrivateInfo" },
+      "description": "Isolated PII document per user."
+    },
+    "/users/{userId}/following/{targetId}": {
+      "schema": { "$ref": "#/entities/FollowEdge" },
+      "description": "Following edges owned by user."
+    },
+    "/users/{userId}/followers/{followerId}": {
+      "schema": { "$ref": "#/entities/FollowEdge" },
+      "description": "Follower edges owned by user."
+    },
+    "/users/{userId}/blocked/{targetId}": {
+      "schema": { "$ref": "#/entities/BlockedUser" },
+      "description": "Blocked user IDs."
+    },
+    "/users/{userId}/bookmarks/{videoId}": {
+      "schema": { "$ref": "#/entities/BookmarkEdge" },
+      "description": "Saved video bookmarks."
+    },
+    "/follow_requests/{requestId}": {
+      "schema": { "$ref": "#/entities/FollowRequest" },
+      "description": "Follow requests for private profiles."
+    },
+    "/videos/{videoId}": {
+      "schema": { "$ref": "#/entities/VideoPost" },
+      "description": "Short videos catalog."
+    },
+    "/videos/{videoId}/likes/{userId}": {
+      "schema": { "$ref": "#/entities/VideoLike" },
+      "description": "Video likes per user."
+    },
+    "/videos/{videoId}/comments/{commentId}": {
+      "schema": { "$ref": "#/entities/VideoComment" },
+      "description": "Video comments."
+    },
+    "/hashtags/{tagId}": {
+      "schema": { "$ref": "#/entities/HashtagItem" },
+      "description": "Trending hashtags."
+    },
+    "/sounds/{soundId}": {
+      "schema": { "$ref": "#/entities/SoundTrack" },
+      "description": "Audio tracks for video creation."
+    },
+    "/conversations/{convId}": {
+      "schema": { "$ref": "#/entities/Conversation" },
+      "description": "Direct chat threads."
+    },
+    "/conversations/{convId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Chat messages within a thread."
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/AppNotification" },
+      "description": "User notifications."
+    },
+    "/live_streams/{streamId}": {
+      "schema": { "$ref": "#/entities/LiveStream" },
+      "description": "Live broadcast rooms."
+    },
+    "/live_streams/{streamId}/comments/{commentId}": {
+      "schema": { "$ref": "#/entities/LiveComment" },
+      "description": "Live room comments."
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/ModerationReport" },
+      "description": "Moderation reports."
+    },
+    "/wallets/{userId}": {
+      "schema": { "$ref": "#/entities/Wallet" },
+      "description": "User wallet state."
+    },
+    "/wallets/{userId}/transactions/{txId}": {
+      "schema": { "$ref": "#/entities/WalletTransaction" },
+      "description": "Wallet ledger entries."
+    },
+    "/withdrawals/{withdrawalId}": {
+      "schema": { "$ref": "#/entities/WithdrawalRequest" },
+      "description": "User withdrawal requests."
+    },
+    "/admin_settings/{settingId}": {
+      "schema": { "$ref": "#/entities/AdminSettings" },
+      "description": "Global platform and Earn With Us settings."
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminRole" },
+      "description": "Assigned platform administrators."
+    },
+    "/watch_wheel_daily/{docId}": {
+      "schema": { "$ref": "#/entities/WatchWheelDaily" },
+      "description": "Daily watch wheel completion tracker."
+    },
+    "/earn_program/{userId}": {
+      "schema": { "$ref": "#/entities/EarnAccount" },
+      "description": "Earn With Us user state and friend progress."
+    },
+    "/earn_referral_codes/{code}": {
+      "schema": { "$ref": "#/entities/EarnReferralCodeMap" },
+      "description": "Referral code to inviter UID mapping."
+    },
+    "/earn_devices/{deviceFingerprint}": {
+      "schema": { "$ref": "#/entities/EarnDevice" },
+      "description": "Device fingerprint anti-fraud ledger."
+    },
+    "/earn_payout_logs/{logId}": {
+      "schema": { "$ref": "#/entities/EarnPayoutLog" },
+      "description": "Audit log of Earn With Us payout decisions."
+    }
+  }
+}

@@ -6,7 +6,6 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import kotlinx.coroutines.flow.MutableStateFlow
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -59,6 +58,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.credentials.CredentialManager
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -76,21 +76,22 @@ import androidx.navigation.navArgument
 import com.example.data.preferences.AppPreferences
 import com.example.data.preferences.AppPreferencesRepository
 import com.example.data.remote.EarnProgramRepository
+import com.example.data.remote.FirebaseBackendRepository
 import com.example.data.remote.StorageMediaRepository
-import com.example.data.remote.SupabaseBackendRepository
-import com.example.data.remote.SupabaseClient
 import com.example.data.repository.ChatRepository
 import com.example.data.repository.LiveRepository
 import com.example.data.repository.NotificationRepository
 import com.example.data.repository.UserRepository
 import com.example.data.repository.VideoRepository
 import com.example.data.repository.WalletAdminRepository
+import com.example.earn.EarnLogic
 import com.example.media.LocalNotificationHelper
 import com.example.security.DeviceIntegrityHelper
 import com.example.ui.VyoraAppViewModel
 import com.example.ui.admin.AdminDashboardScreen
 import com.example.ui.auth.AuthScreen
-import com.example.ui.auth.restoreSupabaseSession
+import com.example.ui.auth.attemptAutoGoogleSignIn
+import com.example.ui.auth.observeFirebaseAuthUser
 import com.example.ui.discover.DiscoverSearchScreen
 import com.example.ui.discover.SoundDetailScreen
 import com.example.ui.earn.EarnWithUsScreen
@@ -109,6 +110,11 @@ import com.example.ui.theme.VyoraTheme
 import com.example.ui.theme.vString
 import com.example.ui.wallet.NotificationsScreen
 import com.example.ui.wallet.WalletScreen
+import com.google.firebase.Firebase
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.storage.storage
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 object VyoraRoutes {
@@ -136,40 +142,40 @@ object VyoraRoutes {
 }
 
 class MainActivity : ComponentActivity() {
-    private val pendingOAuthCallbackUri = MutableStateFlow<Uri?>(null)
+    private val pendingInviteReferralCode = MutableStateFlow("")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         LocalNotificationHelper.ensureChannel(this)
-        captureOAuthIntent(intent)
+        captureInviteReferralIntent(intent)
 
         setContent {
             val context = LocalContext.current
             val scope = rememberCoroutineScope()
-            val supabase = remember(context) { SupabaseClient.getInstance(context.applicationContext) }
+            val auth = remember { FirebaseAuth.getInstance() }
             val prefsRepo = remember(context) { AppPreferencesRepository(context.applicationContext) }
+            val credentialManager = remember(context) { CredentialManager.create(context) }
             val prefs by prefsRepo.preferencesFlow.collectAsStateWithLifecycle(initialValue = AppPreferences())
-            val currentUser by supabase.authState.collectAsStateWithLifecycle()
-            val incomingAuthUri by pendingOAuthCallbackUri.collectAsStateWithLifecycle()
-            var oauthProcessing by remember { mutableStateOf(false) }
-            var oauthErrorMessage by remember { mutableStateOf<String?>(null) }
+            val currentUser by remember(auth) { observeFirebaseAuthUser(auth) }
+                .collectAsStateWithLifecycle(initialValue = auth.currentUser)
+            val incomingReferral by pendingInviteReferralCode.collectAsStateWithLifecycle()
 
-            LaunchedEffect(Unit) {
-                restoreSupabaseSession(context = context, scope = scope)
+            LaunchedEffect(incomingReferral) {
+                val code = incomingReferral
+                if (code.isNotBlank()) {
+                    prefsRepo.setPendingReferralCode(code)
+                }
             }
 
-            LaunchedEffect(incomingAuthUri) {
-                val uri = incomingAuthUri ?: return@LaunchedEffect
-                pendingOAuthCallbackUri.value = null
-                oauthProcessing = true
-                oauthErrorMessage = null
-                supabase.handleOAuthCallbackUri(uri)
-                    .onFailure { err ->
-                        oauthErrorMessage = err.localizedMessage
-                            ?: context.getString(R.string.oauth_callback_failed)
-                    }
-                oauthProcessing = false
+            LaunchedEffect(currentUser) {
+                if (currentUser == null) {
+                    attemptAutoGoogleSignIn(
+                        context = context,
+                        credentialManager = credentialManager,
+                        scope = scope
+                    )
+                }
             }
 
             VyoraTheme(themeMode = prefs.themeMode, language = prefs.language) {
@@ -182,13 +188,7 @@ class MainActivity : ComponentActivity() {
                             scope.launch { prefsRepo.setLanguage(nextLang) }
                         },
                         onAuthSuccess = {},
-                        initialReferralCode = prefs.pendingReferralCode,
-                        onReferralCodeChanged = { code ->
-                            scope.launch { prefsRepo.setPendingReferralCode(code) }
-                        },
-                        externalErrorMessage = oauthErrorMessage,
-                        externalLoading = oauthProcessing,
-                        onClearExternalError = { oauthErrorMessage = null }
+                        hasAutoInvitePending = prefs.pendingReferralCode.isNotBlank()
                     )
                 } else {
                     key(user.uid) {
@@ -197,25 +197,36 @@ class MainActivity : ComponentActivity() {
                             factory = viewModelFactory {
                                 initializer {
                                     val appCtx = context.applicationContext
-                                    val client = SupabaseClient.getInstance(appCtx)
+                                    val dbId = appCtx.getString(R.string.firestore_database_id)
+                                    val firestore = FirebaseFirestore.getInstance(dbId)
+                                    val firebaseAuth = FirebaseAuth.getInstance()
+                                    val storage = Firebase.storage
                                     VyoraAppViewModel(
                                         currentUserId = user.uid,
-                                        supabaseClient = client,
-                                        userRepo = UserRepository(client),
-                                        videoRepo = VideoRepository(client),
-                                        chatRepo = ChatRepository(client),
-                                        liveRepo = LiveRepository(client),
-                                        notifRepo = NotificationRepository(client),
-                                        walletAdminRepo = WalletAdminRepository(client),
-                                        storageRepo = StorageMediaRepository(appCtx, client),
-                                        backendRepo = SupabaseBackendRepository(client),
-                                        earnRepo = EarnProgramRepository(client),
+                                        auth = firebaseAuth,
+                                        userRepo = UserRepository(firestore, firebaseAuth),
+                                        videoRepo = VideoRepository(firestore, firebaseAuth),
+                                        chatRepo = ChatRepository(firestore, firebaseAuth),
+                                        liveRepo = LiveRepository(firestore, firebaseAuth),
+                                        notifRepo = NotificationRepository(firestore, firebaseAuth),
+                                        walletAdminRepo = WalletAdminRepository(firestore, firebaseAuth),
+                                        storageRepo = StorageMediaRepository(appCtx, storage, firebaseAuth),
+                                        backendRepo = FirebaseBackendRepository(firestore, firebaseAuth),
+                                        earnRepo = EarnProgramRepository(firestore, firebaseAuth),
                                         deviceIntegrityHelper = DeviceIntegrityHelper(appCtx),
                                         prefsRepo = prefsRepo
                                     )
                                 }
                             }
                         )
+
+                        LaunchedEffect(incomingReferral) {
+                            val code = incomingReferral
+                            if (code.isNotBlank()) {
+                                pendingInviteReferralCode.value = ""
+                                vm.applyIncomingReferralCode(code)
+                            }
+                        }
 
                         VyoraAuthenticatedApp(
                             viewModel = vm,
@@ -242,13 +253,13 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        captureOAuthIntent(intent)
+        captureInviteReferralIntent(intent)
     }
 
-    private fun captureOAuthIntent(intent: Intent?) {
-        val data = intent?.data
-        if (SupabaseClient.isOAuthCallbackUri(data)) {
-            pendingOAuthCallbackUri.value = data
+    private fun captureInviteReferralIntent(intent: Intent?) {
+        val code = EarnLogic.extractReferralCodeFromUri(intent?.data)
+        if (code.isNotBlank()) {
+            pendingInviteReferralCode.value = code
         }
     }
 }

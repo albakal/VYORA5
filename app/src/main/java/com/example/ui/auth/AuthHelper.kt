@@ -1,10 +1,7 @@
 package com.example.ui.auth
 
 import android.app.Activity
-import android.content.ActivityNotFoundException
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import android.util.Log
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
@@ -13,95 +10,70 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.NoCredentialException
-import com.example.BuildConfig
 import com.example.R
-import com.example.data.remote.SupabaseClient
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.Companion.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.auth.GoogleAuthProvider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
-import java.security.MessageDigest
-import java.util.UUID
 
-const val DEFAULT_GOOGLE_WEB_CLIENT_ID =
-    "10645768320-m2fq6i9v657hk9kgv0of5icpst3b2mkd.apps.googleusercontent.com"
-
-fun resolveGoogleWebClientId(
-    configuredValue: String = BuildConfig.SUPABASE_GOOGLE_WEB_CLIENT_ID
-): String {
-    val cleaned = configuredValue.trim()
-    return if (cleaned.isBlank() || cleaned.contains("YOUR_GOOGLE_WEB_CLIENT_ID", ignoreCase = true)) {
-        DEFAULT_GOOGLE_WEB_CLIENT_ID
-    } else {
-        cleaned
+fun observeFirebaseAuthUser(auth: FirebaseAuth = FirebaseAuth.getInstance()): Flow<FirebaseUser?> = callbackFlow {
+    val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+        trySend(firebaseAuth.currentUser)
     }
+    auth.addAuthStateListener(listener)
+    trySend(auth.currentUser)
+    awaitClose { auth.removeAuthStateListener(listener) }
 }
 
-fun isGoogleSignInConfigured(): Boolean = resolveGoogleWebClientId().isNotBlank()
-
-fun restoreSupabaseSession(
+fun attemptAutoGoogleSignIn(
     context: Context,
+    credentialManager: CredentialManager,
     scope: CoroutineScope,
-    onRestored: () -> Unit = {},
-    onUnauthenticated: () -> Unit = {}
+    onSuccess: () -> Unit = {}
 ) {
-    val supabase = SupabaseClient.getInstance(context)
-    scope.launch {
-        val user = supabase.restoreSession()
-        if (user != null) {
-            onRestored()
-        } else {
-            onUnauthenticated()
-        }
-    }
-}
+    val auth = FirebaseAuth.getInstance()
+    if (auth.currentUser != null) return
+    val serverClientId = context.getString(R.string.default_web_client_id).trim()
+    if (serverClientId.isBlank()) return
 
-fun launchGoogleBrowserOAuth(
-    context: Context,
-    scope: CoroutineScope,
-    onLaunched: () -> Unit,
-    onAuthError: (String) -> Unit
-) {
-    val supabase = SupabaseClient.getInstance(context)
-    if (!supabase.isConfigured) {
-        onAuthError(context.getString(R.string.supabase_keys_required_error))
-        return
-    }
-    scope.launch {
-        launchGoogleBrowserOAuthSuspend(
-            context = context,
-            supabase = supabase,
-            onLaunched = onLaunched,
-            onAuthError = onAuthError
-        )
-    }
-}
+    val googleIdOption = GetGoogleIdOption.Builder()
+        .setFilterByAuthorizedAccounts(true)
+        .setServerClientId(serverClientId)
+        .setAutoSelectEnabled(true)
+        .build()
+    val request = GetCredentialRequest.Builder()
+        .addCredentialOption(googleIdOption)
+        .build()
 
-private suspend fun launchGoogleBrowserOAuthSuspend(
-    context: Context,
-    supabase: SupabaseClient,
-    onLaunched: () -> Unit,
-    onAuthError: (String) -> Unit
-) {
-    try {
-        val authUrl = supabase.prepareGoogleOAuthUrl()
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(authUrl)).apply {
-            addCategory(Intent.CATEGORY_BROWSABLE)
-            if (context !is Activity) {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    scope.launch {
+        try {
+            val activityContext = (context as? Activity) ?: context
+            val result = credentialManager.getCredential(activityContext, request)
+            val credential = result.credential
+            if (credential is CustomCredential && credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                val idToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
+                auth.signInWithCredential(GoogleAuthProvider.getCredential(idToken, null)).await()
+                onSuccess()
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: NoCredentialException) {
+            // Normal on first launch when user has not previously authorized an account
+        } catch (e: Exception) {
+            Log.d("Auth", "Silent Google auto-sign-in skipped: ${e.message}")
         }
-        context.startActivity(intent)
-        onLaunched()
-    } catch (e: ActivityNotFoundException) {
-        Log.e("Auth", "No browser app found for OAuth", e)
-        onAuthError(context.getString(R.string.auth_no_browser_error))
-    } catch (e: Exception) {
-        Log.e("Auth", "Browser Google OAuth launch failed", e)
-        onAuthError(e.localizedMessage ?: context.getString(R.string.oauth_callback_failed))
     }
 }
 
@@ -111,22 +83,15 @@ fun onGoogleSignInClicked(
     onAuthSuccess: () -> Unit,
     onAuthError: (String) -> Unit,
     onAuthCancelled: () -> Unit,
-    onBrowserFlowStarted: () -> Unit = {},
     scope: CoroutineScope
 ) {
-    val supabase = SupabaseClient.getInstance(context)
-    if (!supabase.isConfigured) {
-        onAuthError(context.getString(R.string.supabase_keys_required_error))
+    val serverClientId = context.getString(R.string.default_web_client_id).trim()
+    if (serverClientId.isBlank()) {
+        onAuthError(context.getString(R.string.firebase_client_id_missing))
         return
     }
-    val clientId = resolveGoogleWebClientId()
-    val rawNonce = UUID.randomUUID().toString()
-    val hashedNonce = MessageDigest.getInstance("SHA-256")
-        .digest(rawNonce.toByteArray(Charsets.UTF_8))
-        .joinToString("") { "%02x".format(it) }
 
-    val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId)
-        .setNonce(hashedNonce)
+    val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = serverClientId)
         .build()
     val request = GetCredentialRequest.Builder()
         .addCredentialOption(signInOption)
@@ -138,40 +103,27 @@ fun onGoogleSignInClicked(
             val result = credentialManager.getCredential(activityContext, request)
             val credential = result.credential
             if (credential is CustomCredential && credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
-                val googleIdToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
-                supabase.signInWithGoogleIdToken(googleIdToken, rawNonce)
-                    .onSuccess { onAuthSuccess() }
-                    .onFailure { e -> onAuthError(e.localizedMessage ?: "Supabase sign-in failed") }
+                val idToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
+                val firebaseCred = GoogleAuthProvider.getCredential(idToken, null)
+                FirebaseAuth.getInstance().signInWithCredential(firebaseCred).await()
+                onAuthSuccess()
             } else {
-                launchGoogleBrowserOAuthSuspend(
-                    context = context,
-                    supabase = supabase,
-                    onLaunched = onBrowserFlowStarted,
-                    onAuthError = onAuthError
-                )
+                onAuthError(context.getString(R.string.firebase_google_signin_failed))
             }
         } catch (e: GetCredentialCancellationException) {
             Log.w("Auth", "Google Sign-In cancelled: ${e.message}", e)
             onAuthCancelled()
         } catch (e: NoCredentialException) {
-            Log.w("Auth", "Credential Manager has no credential; falling back to Browser OAuth", e)
-            launchGoogleBrowserOAuthSuspend(
-                context = context,
-                supabase = supabase,
-                onLaunched = onBrowserFlowStarted,
-                onAuthError = onAuthError
-            )
+            Log.w("Auth", "No Google account available on device: ${e.message}", e)
+            onAuthError(context.getString(R.string.firebase_no_google_account))
         } catch (e: GetCredentialException) {
-            Log.w("Auth", "Credential Manager unavailable (${e.type}); falling back to Browser OAuth", e)
-            launchGoogleBrowserOAuthSuspend(
-                context = context,
-                supabase = supabase,
-                onLaunched = onBrowserFlowStarted,
-                onAuthError = onAuthError
-            )
+            Log.e("Auth", "Credential Manager failed (${e.type}): ${e.message}", e)
+            onAuthError(e.localizedMessage ?: context.getString(R.string.firebase_google_signin_failed))
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Log.e("Auth", "Google Sign-In failed", e)
-            onAuthError(e.localizedMessage ?: "Sign in failed")
+            Log.e("Auth", "Firebase Google Sign-In failed", e)
+            onAuthError(e.localizedMessage ?: context.getString(R.string.firebase_google_signin_failed))
         }
     }
 }
@@ -188,7 +140,7 @@ fun signOutVyora(
             } catch (e: Exception) {
                 Log.w("Auth", "Failed to clear credential state: ${e.message}")
             } finally {
-                SupabaseClient.currentInstanceOrNull()?.signOut()
+                FirebaseAuth.getInstance().signOut()
                 onSignOutComplete()
             }
         }

@@ -4,26 +4,14 @@
     <!-- Auth -->
     <string name="auth_tagline">أبدع. انطلق. تألق في كل لقطة.</string>
     <string name="auth_subtitle">فيديوهات قصيرة فورية، بث مباشر تفاعلي، مراسلة لحظية، ومكافآت لصناع المحتوى.</string>
-    <string name="auth_sign_in">تسجيل الدخول</string>
-    <string name="auth_create_account">إنشاء حساب</string>
-    <string name="auth_display_name">الاسم الظاهر</string>
-    <string name="auth_email">البريد الإلكتروني</string>
-    <string name="auth_password">كلمة المرور</string>
-    <string name="auth_invalid_credentials_hint">أدخل بريداً إلكترونياً صحيحاً وكلمة مرور من 6 أحرف على الأقل.</string>
-    <string name="supabase_auth_ready">متصل بخادم Supabase</string>
-    <string name="supabase_config_missing">أضف SUPABASE_URL و SUPABASE_PUBLISHABLE_KEY في Secrets لتفعيل المزامنة السحابية</string>
-    <string name="sign_in_google">تسجيل الدخول عبر Gmail</string>
-    <string name="gmail_auth_hint">سجّل دخولك أو أنشئ حسابك فوراً بضغطة واحدة باستخدام حساب Gmail الخاص بك.</string>
-    <string name="auth_or_email_toggle">أو الدخول بالبريد الإلكتروني وكلمة المرور</string>
-    <string name="auth_hide_email_toggle">إخفاء الدخول بالبريد الإلكتروني</string>
-    <string name="gmail_client_id_missing">أضف SUPABASE_GOOGLE_WEB_CLIENT_ID في Secrets لتفعيل تسجيل الدخول المباشر عبر Gmail.</string>
-    <string name="supabase_keys_required_error">يرجى ضبط SUPABASE_URL و SUPABASE_PUBLISHABLE_KEY في Secrets للاتصال بقاعدة البيانات.</string>
+    <string name="firebase_auth_ready">متصل بقاعدة بيانات Firebase وتسجيل الدخول عبر جوجل</string>
+    <string name="sign_in_google">المتابعة بحساب جوجل</string>
+    <string name="gmail_auth_hint">سجّل دخولك أو أنشئ حسابك فوراً بضغطة واحدة باستخدام حساب جوجل الخاص بك.</string>
+    <string name="firebase_client_id_missing">معرّف عميل جوجل مفقود من ملف google-services.json.</string>
+    <string name="firebase_google_signin_failed">تعذر إتمام تسجيل الدخول بحساب جوجل على Firebase. حاول مرة أخرى.</string>
+    <string name="firebase_no_google_account">لا يوجد حساب جوجل مسجل على هذا الهاتف. أضف حساب جوجل من إعدادات الجهاز.</string>
     <string name="auth_signing_in">جاري تسجيل الدخول…</string>
     <string name="auth_cancelled">تم إلغاء تسجيل الدخول. اضغط للمحاولة مجدداً.</string>
-    <string name="auth_google_browser_fallback">أو المتابعة عبر متصفح جوجل (OAuth)</string>
-    <string name="auth_google_browser_opened">أكمل تسجيل الدخول في المتصفح وسيتم إعادتك تلقائياً إلى VYORA.</string>
-    <string name="auth_no_browser_error">لم يتم العثور على تطبيق متصفح لفتح تسجيل دخول جوجل.</string>
-    <string name="oauth_callback_failed">تعذر إتمام تسجيل الدخول عبر جوجل. تأكد من إضافة vyora://auth-callback في Redirect URLs بلوحة Supabase.</string>
 
     <!-- Navigation Tabs -->
     <string name="nav_home">الرئيسية</string>
@@ -101,8 +89,8 @@
     <string name="start_live_btn">بدء البث المباشر</string>
     <string name="end_live_btn">إنهاء البث</string>
     <string name="live_viewers">%1$d مشاهد</string>
-    <string name="agora_missing_warning">انشر دالة Supabase Edge Function (get-agora-token) واضبط مفاتيح AGORA في Supabase Secrets لتفعيل البث المرئي. دردشة البث وإحصائياته فعالة.</string>
-    <string name="live_preview_local_note">معاينة الكاميرا المحلية تعمل. فعّل دالة get-agora-token ومفاتيح Agora في Supabase للبث إلى المشاهدين.</string>
+    <string name="agora_missing_warning">أضف AGORA_APP_ID في Secrets لتفعيل البث المرئي الجماعي. دردشة البث وإحصائياته متزامنة عبر Firebase.</string>
+    <string name="live_preview_local_note">معاينة الكاميرا المحلية تعمل. أضف AGORA_APP_ID في Secrets للبث المرئي المباشر للمشاهدين.</string>
     <string name="retry">إعادة المحاولة</string>
     <string name="no_live_streams">لا توجد جلسات بث مباشر حالياً.</string>
 
@@ -145,10 +133,9 @@
     <string name="request_withdrawal">طلب سحب</string>
     <string name="min_withdrawal_note">الحد الأدنى للسحب: %1$.2f$</string>
     <string name="transactions_history">سجل الأرباح</string>
-    <string name="supabase_ledger_title">السجل المحاسبي (Supabase)</string>
-    <string name="supabase_ledger_synced">متزامن • %1$d قيد مالي • %2$d فيديو</string>
-    <string name="supabase_ledger_pending_config">أضف SUPABASE_URL و SUPABASE_PUBLISHABLE_KEY في Secrets وشغّل /supabase/schema.sql</string>
-    <string name="supabase_ledger_checking">جاري فحص المزامنة المحاسبية…</string>
+    <string name="firebase_ledger_title">السجل السحابي (Firebase)</string>
+    <string name="firebase_ledger_synced">متزامن • %1$d قيد مالي • %2$d فيديو</string>
+    <string name="firebase_ledger_checking">جاري فحص المزامنة مع Firebase…</string>
     <string name="sync_now">مزامنة</string>
 
     <!-- Admin -->
@@ -177,27 +164,26 @@
     <string name="earn_status_rejected">مرفوضة</string>
     <string name="earn_paused_banner">برنامج اربح معنا متوقف مؤقتاً من قبل الإدارة حالياً.</string>
     <string name="earn_personal_videos">الفيديوهات الشخصية</string>
-    <string name="earn_invited_friends">الأصدقاء المسجلون بكودك</string>
+    <string name="earn_invited_friends">الأصدقاء المسجلون بدعوتك</string>
     <string name="earn_completed_friends">الأصدقاء المكتملون</string>
     <string name="earn_my_daily_usage">نشاطك اليومي (توقيت مصر)</string>
-    <string name="earn_referral_code_title">كود الإحالة الخاص بك</string>
-    <string name="earn_copy_code">نسخ الكود</string>
+    <string name="earn_invite_link_title">رابط الدعوة الخاص بك</string>
+    <string name="earn_copy_link">نسخ الرابط</string>
     <string name="earn_share_invite">مشاركة الدعوة</string>
-    <string name="earn_code_copied">تم نسخ كود الإحالة!</string>
-    <string name="earn_share_message">سجّل في تطبيق VYORA واستخدم كود الدعوة الخاص بي %1$s أثناء التسجيل!</string>
-    <string name="earn_redeem_title">هل لديك كود دعوة من صديق؟</string>
-    <string name="earn_redeem_hint">أدخل كود الإحالة (يُستخدم مرة واحدة فقط)</string>
-    <string name="earn_redeem_submit">تفعيل الكود</string>
-    <string name="earn_redeemed_badge">مرتبط بكود الإحالة: %1$s</string>
+    <string name="earn_link_copied">تم نسخ رابط الدعوة!</string>
+    <string name="earn_share_link_message">سجّل في تطبيق VYORA بالضغط على رابط الدعوة الخاص بي ليتم احتساب الدعوة تلقائياً: %1$s</string>
+    <string name="earn_auto_invite_ready">تم التقاط رابط الدعوة — سيتم تفعيله تلقائياً بعد تسجيل الدخول بجوجل.</string>
+    <string name="earn_auto_attribution_title">احتساب الدعوات تلقائياً</string>
+    <string name="earn_auto_link_hint">يتم ربط الصديق بحسابك تلقائياً بمجرد ضغطه على رابط الدعوة وفتح التطبيق.</string>
+    <string name="earn_redeemed_badge">تم ربط هذا الحساب تلقائياً عبر رابط الدعوة</string>
     <string name="earn_friends_progress_title">متابعة الأصدقاء المدعوين (%1$d/%2$d)</string>
-    <string name="earn_no_friends_yet">لم يسجل أي صديق بكودك بعد. شارك كودك للبدء!</string>
+    <string name="earn_no_friends_yet">لم يسجل أي صديق عبر رابطك بعد. شارك رابط الدعوة للبدء!</string>
     <string name="earn_friend_days">الأيام المتتالية: %1$d من %2$d</string>
     <string name="earn_friend_minutes">الاستخدام اليوم: %1$d من %2$d دقيقة</string>
     <string name="earn_friend_videos">فيديوهات اليوم: %1$d من %2$d</string>
     <string name="earn_friend_completed">مكتمل</string>
     <string name="earn_friend_under_review">الجهاز قيد المراجعة</string>
     <string name="earn_security_notice">حساب واحد مؤهل للمكافأة لكل هاتف. الأجهزة العائلية المشتركة تخضع لمراجعة الإدارة.</string>
-    <string name="earn_auth_referral_label">كود الإحالة من صديق (اختياري)</string>
     <string name="earn_admin_enable_toggle">تفعيل برنامج اربح معنا</string>
     <string name="earn_admin_suspicious_devices">الأجهزة المشبوهة / المشتركة</string>
     <string name="earn_admin_approve_exception">اعتماد استثناء عائلي</string>

@@ -3,20 +3,15 @@ package com.example
 import android.content.Context
 import android.content.res.Configuration
 import androidx.test.core.app.ApplicationProvider
-import com.example.data.model.VyoraTimestamp
-import com.example.data.remote.SupabaseClient
-import com.example.data.remote.SupabaseLedgerClient
-import com.example.data.remote.toUserProfile
-import com.example.data.remote.toVideoPost
-import com.example.data.remote.toWallet
+import com.example.data.model.AdminSettings
+import com.example.data.model.UserProfile
+import com.example.data.model.VideoPost
+import com.example.data.model.Wallet
+import com.example.earn.EarnLogic
 import com.example.media.ApkExportHelper
 import com.example.media.formatCompactCount
-import kotlinx.coroutines.runBlocking
-import org.json.JSONArray
-import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -33,14 +28,15 @@ class ExampleRobolectricTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val appName = context.getString(R.string.app_name)
         assertEquals("VYORA", appName)
-        assertTrue(context.getString(R.string.supabase_ledger_title).contains("Supabase"))
-        assertTrue(context.getString(R.string.supabase_auth_ready).contains("Supabase"))
-        assertTrue(context.getString(R.string.sign_in_google).contains("Gmail"))
+        assertTrue(context.getString(R.string.firebase_ledger_title).contains("Firebase"))
+        assertTrue(context.getString(R.string.firebase_auth_ready).contains("Firebase"))
+        assertTrue(context.getString(R.string.sign_in_google).contains("Google"))
         assertTrue(context.getString(R.string.save_apk_button).contains("APK"))
+        assertFalse(context.getString(R.string.firestore_database_id).isBlank())
     }
 
     @Test
-    fun `arabic localization includes supabase auth ledger and apk strings`() {
+    fun `arabic localization includes firebase auth ledger and apk strings`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val arLocale = Locale.forLanguageTag("ar")
         val config = Configuration(context.resources.configuration).apply {
@@ -48,9 +44,9 @@ class ExampleRobolectricTest {
             setLayoutDirection(arLocale)
         }
         val arRes = context.createConfigurationContext(config).resources
-        assertTrue(arRes.getString(R.string.supabase_ledger_title).contains("Supabase"))
-        assertTrue(arRes.getString(R.string.supabase_auth_ready).contains("Supabase"))
-        assertTrue(arRes.getString(R.string.sign_in_google).contains("Gmail"))
+        assertTrue(arRes.getString(R.string.firebase_ledger_title).contains("Firebase"))
+        assertTrue(arRes.getString(R.string.firebase_auth_ready).contains("Firebase"))
+        assertTrue(arRes.getString(R.string.sign_in_google).contains("جوجل"))
         assertTrue(arRes.getString(R.string.save_apk_button).contains("APK"))
     }
 
@@ -63,72 +59,46 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `supabase config validation rejects placeholders and accepts real credentials`() {
-        assertFalse(
-            SupabaseClient.isConfigValid(
-                "https://YOUR_PROJECT_REF.supabase.co",
-                "YOUR_SUPABASE_PUBLISHABLE_KEY"
-            )
-        )
-        assertFalse(SupabaseClient.isConfigValid("http://insecure.supabase.co", "sb_publishable_123"))
-        assertTrue(SupabaseClient.isConfigValid("https://abcdefg.supabase.co", "sb_publishable_valid_key"))
-    }
-
-    @Test
-    fun `supabase json mappers parse profile video and wallet rows cleanly`() {
-        val profileJson = JSONObject().apply {
-            put("user_id", "usr-123")
-            put("username", "vyora_star")
-            put("display_name", "Vyora Star")
-            put("followers_count", 42L)
-            put("interests", JSONArray(listOf("music", "tech")))
-            put("created_at", "2026-01-15T10:30:00Z")
-        }
-        val profile = profileJson.toUserProfile()
+    fun `firestore models instantiate with expected defaults`() {
+        val profile = UserProfile(userId = "usr-123", username = "vyora_star", followersCount = 42L)
         assertEquals("usr-123", profile.userId)
         assertEquals("vyora_star", profile.username)
         assertEquals(42L, profile.followersCount)
-        assertEquals(listOf("music", "tech"), profile.interests)
-        assertNotNull(profile.createdAt)
+        assertFalse(profile.isPrivate)
+        assertFalse(profile.isBanned)
 
-        val videoJson = JSONObject().apply {
-            put("video_id", "vid-99")
-            put("creator_uid", "usr-123")
-            put("creator_username", "vyora_star")
-            put("video_url", "https://example.supabase.co/storage/v1/object/public/vyora-media/v.mp4")
-            put("views_count", 500L)
-            put("likes_count", 25L)
-        }
-        val video = videoJson.toVideoPost()
+        val video = VideoPost(
+            id = "vid-99",
+            userId = "usr-123",
+            creatorUsername = "vyora_star",
+            videoUrl = "https://firebasestorage.googleapis.com/v0/b/demo/o/video.mp4",
+            viewsCount = 500L,
+            likesCount = 25L
+        )
         assertEquals("vid-99", video.id)
+        assertEquals("active", video.status)
         assertEquals(500L, video.viewsCount)
         assertEquals(25L, video.likesCount)
 
-        val walletJson = JSONObject().apply {
-            put("user_id", "usr-123")
-            put("points", 1200L)
-            put("balance_usd", 12.0)
-            put("total_earned_usd", 18.5)
-        }
-        val wallet = walletJson.toWallet()
+        val wallet = Wallet(userId = "usr-123", points = 1200L, balanceUsd = 12.0)
         assertEquals(1200L, wallet.points)
         assertEquals(12.0, wallet.balanceUsd, 0.001)
+
+        val settings = AdminSettings(id = "global")
+        assertTrue(settings.watchWheelEnabled)
+        assertEquals(30L, settings.watchWheelCycleSec)
     }
 
     @Test
-    fun `vyora timestamp parses iso timestamps and orders properly`() {
-        val older = VyoraTimestamp.parse("2025-01-01T00:00:00Z")!!
-        val newer = VyoraTimestamp.parse("2026-01-01T00:00:00Z")!!
-        assertTrue(newer > older)
-    }
+    fun `referral invite uri builder and extractor support https and custom scheme links`() {
+        val httpsLink = EarnLogic.buildReferralInviteUri("vy12ab34")
+        assertEquals("https://vyora.app/invite?ref=VY12AB34", httpsLink)
+        assertEquals("VY12AB34", EarnLogic.extractReferralCodeFromUri(android.net.Uri.parse(httpsLink)))
 
-    @Test
-    fun `supabase ledger client safely handles placeholder credentials`() = runBlocking {
-        val client = SupabaseLedgerClient()
-        if (!client.isClientConfigured) {
-            val diag = client.checkPublicCatalogConnectivity()
-            assertFalse(diag.clientKeysConfigured)
-            assertFalse(diag.restReachable)
-        }
+        val schemeLink = EarnLogic.buildCustomSchemeInviteUri("vy998877")
+        assertEquals("vyora://invite?ref=VY998877", schemeLink)
+        assertEquals("VY998877", EarnLogic.extractReferralCodeFromUri(android.net.Uri.parse(schemeLink)))
+
+        assertEquals("", EarnLogic.extractReferralCodeFromUri(android.net.Uri.parse("https://other.site/invite?ref=VY12AB34")))
     }
 }

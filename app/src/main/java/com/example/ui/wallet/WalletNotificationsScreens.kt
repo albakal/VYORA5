@@ -249,25 +249,22 @@ fun WalletScreen(
                     is LedgerSyncState.Checking -> Triple(
                         NeonCyan,
                         Icons.Filled.CloudSync,
-                        vString(R.string.supabase_ledger_checking)
+                        vString(R.string.firebase_ledger_checking)
                     )
                     is LedgerSyncState.Synced -> Triple(
                         EmeraldLive,
                         Icons.Filled.CloudDone,
                         vString(
-                            R.string.supabase_ledger_synced,
+                            R.string.firebase_ledger_synced,
                             st.summary.transactionsCount,
                             st.summary.videosCount
                         )
                     )
-                    is LedgerSyncState.PendingSetup -> {
-                        val detail = if (st.diagnostics.restReachable) {
-                            "${vString(R.string.supabase_ledger_pending_config)} (REST OK)"
-                        } else {
-                            vString(R.string.supabase_ledger_pending_config)
-                        }
-                        Triple(AmberGold, Icons.Filled.CloudSync, detail)
-                    }
+                    is LedgerSyncState.Error -> Triple(
+                        AmberGold,
+                        Icons.Filled.CloudSync,
+                        st.message
+                    )
                 }
 
                 Surface(
@@ -292,7 +289,7 @@ fun WalletScreen(
                         Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = vString(R.string.supabase_ledger_title),
+                                text = vString(R.string.firebase_ledger_title),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold
                             )
@@ -304,7 +301,7 @@ fun WalletScreen(
                         }
                         IconButton(
                             onClick = { viewModel.refreshAccountingSync() },
-                            modifier = Modifier.testTag("wallet_sync_supabase_button")
+                            modifier = Modifier.testTag("wallet_sync_firebase_button")
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.Refresh,
