@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "819688041003",
+    "project_id": "android-f945b",
+    "storage_bucket": "android-f945b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:819688041003:android:c77ef2c2360098bda4186e",
+        "android_client_info": {
+          "package_name": "com.aistudio.vyora.kxpvqr"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCItM9kQ9oSuNaWvKpLNkXgusngpdq--KQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

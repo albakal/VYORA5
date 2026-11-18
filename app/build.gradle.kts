@@ -13,7 +13,7 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.vyora.kxpvqr"
+    applicationId = "com.aistudio.vyora.rmnqwx"
     minSdk = 26
     targetSdk = 36
     versionCode = 1
